@@ -2,7 +2,7 @@ import pygame
 import cv2
 
 
-def box(img: pygame.Surface, radius) -> pygame.Surface:
+def box(img: pygame.Surface, radius, params=None) -> pygame.Surface:
     """
     Performs a "Box Filter" blur.
     """
@@ -13,7 +13,7 @@ def box(img: pygame.Surface, radius) -> pygame.Surface:
     return res
 
 
-def gaussian(img: pygame.Surface, radius) -> pygame.Surface:
+def gaussian(img: pygame.Surface, radius, params=None) -> pygame.Surface:
     """
     Performs a Gaussian blur.
     """

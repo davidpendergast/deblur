@@ -155,7 +155,8 @@ class AbstractIterativeDeblurrer:
         raise NotImplementedError()
 
     def get_initial_guess(self) -> pygame.Surface:
-        return self.get_target_image().copy()
+        target = self.get_target_image()
+        return None if target is None else target.copy()
 
     def do_blur(self, surf: pygame.Surface, strength=1.0) -> pygame.Surface:
         raise NotImplementedError()
@@ -219,6 +220,9 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
 
     def get_correction_intensity(self, iteration):
         raise NotImplementedError()
+
+    def get_iteration(self) -> int:
+        return self.iter_count
 
     def step(self):
         if self.img is None:
@@ -298,7 +302,6 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
             pygame.surfarray.pixels_green(img),
             pygame.surfarray.pixels_blue(img)
         ]
-
 
 
 if __name__ == "__main__":
