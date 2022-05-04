@@ -184,33 +184,33 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
 
     def __init__(self):
         super().__init__()
-        self._target = None
+        self.target = None
 
         self.img: typing.Optional[pygame.Surface] = None
         self.iter_count = 0
 
         self.current_error = -1.0
-        self._blurred_img = None
-        self.target_minus_img = None
-        self.target_minus_img_blurred = None
-        self.img_minus_target = None
-        self.img_minus_target_blurred = None
+        self.blurred_img = None
+        self.target_minus_blurred_img = None
+        self.target_minus_blurred_img_blurred = None
+        self.blurred_img_minus_target = None
+        self.blurred_img_minus_target_blurred = None
         self.combined_error_image = None
 
         self.reset()
 
     def set_target_image(self, surf: pygame.Surface):
-        self._target = surf
+        self.target = surf
         self.reset()
 
     def get_target_image(self) -> pygame.Surface:
-        return self._target
+        return self.target
 
     def get_output_image(self) -> pygame.Surface:
         return self.img
 
     def get_blurred_output_image(self):
-        return self._blurred_img
+        return self.blurred_img
 
     def get_error_image(self):
         return self.combined_error_image
@@ -227,8 +227,12 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
     def step(self):
         if self.img is None:
             return
-        blur_dist_array = pygame.surfarray.pixels3d(self.target_minus_img_blurred)
-        blur_anti_dist_array = pygame.surfarray.pixels3d(self.img_minus_target_blurred)
+
+        if None in (self.target_minus_blurred_img_blurred, self.blurred_img_minus_target_blurred):
+            self._calc_derived_images()
+
+        blur_dist_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img_blurred)
+        blur_anti_dist_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target_blurred)
         correction_intensity = self.get_correction_intensity(self.iter_count)
 
         new_img_int8 = pygame.surfarray.array3d(self.img)
@@ -237,7 +241,7 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
 
         new_img[:] = new_img + blur_dist_array * (rand * correction_intensity)
         new_img[:] = new_img - blur_anti_dist_array * (rand * correction_intensity)
-        new_img[:] = numpy.minimum(new_img, 255.999)
+        new_img[:] = numpy.minimum(new_img, 255)
         new_img[:] = numpy.maximum(new_img, 0)
 
         new_img_int8[:] = new_img.astype(numpy.int8, casting='unsafe')
@@ -251,24 +255,31 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
         self.current_error = -1.0
 
         self.img = self.get_initial_guess()
-        self._blurred_img = None if self.img is None else self.do_blur(self.img)
+        self.blurred_img = None if self.img is None else self.do_blur(self.img)
 
-        self.target_minus_img: pygame.Surface = None
-        self.target_minus_img_blurred: pygame.Surface = None
-        self.img_minus_target: pygame.Surface = None
-        self.img_minus_target_blurred: pygame.Surface = None
+        self.target_minus_blurred_img: pygame.Surface = None
+        self.target_minus_blurred_img_blurred: pygame.Surface = None
+        self.blurred_img_minus_target: pygame.Surface = None
+        self.blurred_img_minus_target_blurred: pygame.Surface = None
         self.combined_error_image: pygame.Surface = None
 
     def _calc_derived_images(self):
         self.blurred_img = None if self.img is None else self.do_blur(self.img)
-        self.target_minus_img, self.img_minus_target = self._calc_distance_in_both_directions(
+        self.target_minus_blurred_img, self.blurred_img_minus_target = self._calc_distance_in_both_directions(
             self.get_blurred_output_image(), self.get_target_image())
 
-        self.target_minus_img_blurred = None if self.target_minus_img is not None else self.do_blur(self.target_minus_img)
-        self.img_minus_target_blurred = None if self.img_minus_target is not None else self.do_blur(self.img_minus_target)
-        if self.target_minus_img_blurred is not None and self.img_minus_target_blurred is not None:
-            combo = numpy.maximum(pygame.surfarray.pixels3d(self.target_minus_img_blurred),
-                                  pygame.surfarray.pixels3d(self.img_minus_target_blurred))
+        self.target_minus_blurred_img_blurred = None if self.target_minus_blurred_img is None else self.do_blur(self.target_minus_blurred_img)
+        self.blurred_img_minus_target_blurred = None if self.blurred_img_minus_target is None else self.do_blur(self.blurred_img_minus_target)
+        if self.target_minus_blurred_img_blurred is not None and self.blurred_img_minus_target_blurred is not None:
+            img_array = pygame.surfarray.pixels3d(self.img)
+            blurred_img_array = pygame.surfarray.pixels3d(self.blurred_img)
+            tgt_array = pygame.surfarray.pixels3d(self.get_target_image())
+            tgt_minus_blurred_img_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img)
+            blurred_img_minus_tgt_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target)
+            tgt_minus_blurred_img_blurred_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img_blurred)
+            blurred_img_minus_tgt_blurred_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target_blurred)
+
+            combo = numpy.maximum(tgt_minus_blurred_img_blurred_array, blurred_img_minus_tgt_blurred_array)
             self.combined_error_image = self.img.copy()
             pygame.surfarray.blit_array(self.combined_error_image, combo)
             avg_color = pygame.transform.average_color(self.combined_error_image, self.combined_error_image.get_rect())
@@ -307,7 +318,7 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
 if __name__ == "__main__":
     pygame.init()
 
-    simulation = Simulation("data/splash_blurred_15.png", blurs.get_blur_func("box"), 15, original_file="data/splash.png", intensity_range=(4, 3), iterations=100)
+    simulation = Simulation("data/splash_blurred_15.png", blurs.get_blur_func("box"), 3, original_file="data/splash.png", intensity_range=(4, 3), iterations=100)
     # simulation = Simulation("data/3x3_circle_in_10x10.png", get_box_filter_func(), 3, original_file="data/3x3_circle_in_10x10_orig.png")
 
     W, H = simulation.target.get_size()
