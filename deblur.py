@@ -263,6 +263,8 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
         self.blurred_img_minus_target_blurred: pygame.Surface = None
         self.combined_error_image: pygame.Surface = None
 
+        self._calc_derived_images()
+
     def _calc_derived_images(self):
         self.blurred_img = None if self.img is None else self.do_blur(self.img)
         self.target_minus_blurred_img, self.blurred_img_minus_target = self._calc_distance_in_both_directions(
@@ -270,20 +272,19 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
 
         self.target_minus_blurred_img_blurred = None if self.target_minus_blurred_img is None else self.do_blur(self.target_minus_blurred_img)
         self.blurred_img_minus_target_blurred = None if self.blurred_img_minus_target is None else self.do_blur(self.blurred_img_minus_target)
-        if self.target_minus_blurred_img_blurred is not None and self.blurred_img_minus_target_blurred is not None:
-            img_array = pygame.surfarray.pixels3d(self.img)
-            blurred_img_array = pygame.surfarray.pixels3d(self.blurred_img)
-            tgt_array = pygame.surfarray.pixels3d(self.get_target_image())
+        if self.target_minus_blurred_img is not None and self.blurred_img_minus_target is not None:
+            # img_array = pygame.surfarray.pixels3d(self.img)
+            # blurred_img_array = pygame.surfarray.pixels3d(self.blurred_img)
+            # tgt_array = pygame.surfarray.pixels3d(self.get_target_image())
             tgt_minus_blurred_img_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img)
             blurred_img_minus_tgt_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target)
-            tgt_minus_blurred_img_blurred_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img_blurred)
-            blurred_img_minus_tgt_blurred_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target_blurred)
+            # tgt_minus_blurred_img_blurred_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img_blurred)
+            # blurred_img_minus_tgt_blurred_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target_blurred)
 
-            combo = numpy.maximum(tgt_minus_blurred_img_blurred_array, blurred_img_minus_tgt_blurred_array)
+            combo = numpy.maximum(tgt_minus_blurred_img_array, blurred_img_minus_tgt_array)
+            self.current_error = numpy.mean(combo)
             self.combined_error_image = self.img.copy()
             pygame.surfarray.blit_array(self.combined_error_image, combo)
-            avg_color = pygame.transform.average_color(self.combined_error_image, self.combined_error_image.get_rect())
-            self.current_error = math.sqrt(avg_color[0] ** 2 + avg_color[1] ** 2 + avg_color[2] ** 2)
         else:
             self.combined_error_image = None
             self.current_error = -1

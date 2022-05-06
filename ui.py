@@ -9,46 +9,53 @@ import typing
 
 class UiControlledIterativeGhastDeblurrer(deblur.AbstractIterativeGhastDeblurrer):
 
-    def __init__(self, simulation_settings: 'SimulationSettings', deblur_settings: 'BlurSettings'):
+    def __init__(self, settings: 'SimulationSettings', deblur_settings: 'BlurSettings'):
         super().__init__()
-        self.simulation_settings = simulation_settings
+        self.settings = settings
         self.deblur_settings = deblur_settings
 
     def get_correction_intensity(self, iteration):
-        return self.simulation_settings.get_correction_intensity(iteration)
+        return self.settings.get_correction_intensity(iteration)
 
     def do_blur(self, surf: pygame.Surface, strength=1.0) -> pygame.Surface:
         return self.deblur_settings.do_blur(surf, strength=strength)
 
     def get_iteration_limit(self) -> int:
-        return self.simulation_settings.iteration_limit
+        return self.settings.iteration_limit
 
 
 class State:
 
-    def __init__(self):
+    def __init__(self, blur_settings=None, deblur_settings=None, simulation_settings=None):
         self.original_image_file = None
         self.original_image = None
 
-        self.blurred_image_file = None
-        self.blurred_image = None
+        self.target_image_file = None
+        self.target_image = None
 
-        self.blur_settings = BlurSettings()
-        self.deblur_settings = BlurSettings()
-        self.simulation_settings = SimulationSettings()
-
-        self.simulation = UiControlledIterativeGhastDeblurrer(self.simulation_settings, self.deblur_settings)
+        self.blur_settings = blur_settings or BlurSettings()
+        self.simulation = UiControlledIterativeGhastDeblurrer(simulation_settings or SimulationSettings(),
+                                                              deblur_settings or BlurSettings())
 
     def set_original_image(self, surf: pygame.Surface, filename: str = None):
         self.original_image_file = filename
         self.original_image = surf
 
-    def set_blurred_image(self, surf: pygame.Surface, filename: str = None):
-        self.blurred_image_file = filename
-        self.blurred_image = surf
+    def set_target_image(self, surf: pygame.Surface, filename: str = None):
+        self.target_image_file = filename
+        self.target_image = surf
 
         self.simulation.set_target_image(surf)
         self.simulation.reset()
+
+    def get_blur_settings(self):
+        return self.blur_settings
+
+    def get_deblur_settings(self):
+        return self.simulation.deblur_settings
+
+    def get_simulation_settings(self):
+        return self.simulation.settings
 
 
 class BlurSettings:
@@ -70,8 +77,6 @@ class SimulationSettings:
         self.start_intensity = 4
         self.end_intensity = 3
         self.intensity_curve = "linear"
-        self.blur_and_unblur = True
-        self.autoplay = True
 
     def get_correction_intensity(self, iterations):
         if iterations >= self.iteration_limit:
@@ -94,24 +99,48 @@ def split_rect(rect: pygame.Rect, n: int, horizontally=True) -> typing.List[pyga
 
 
 def render_in_rect_responsibly(img: pygame.Surface, rect: pygame.Rect, dest: pygame.Surface, integer_upscale_only=True):
-    # TODO make it responsible
     if img is not None:
-        scaled_img = pygame.transform.scale(img, rect.size)
-        dest.blit(scaled_img, rect)
+        w, h = img.get_size()
+
+        scale = min(rect.width / w, rect.height / h)
+        if scale > 1 and integer_upscale_only:
+            scale = int(scale)
+        scaled_img = pygame.transform.scale(img, (int(w * scale), int(h * scale)))
+
+        x = rect.centerx - scaled_img.get_width() // 2
+        y = rect.centery - scaled_img.get_height() // 2
+        dest.blit(scaled_img, (x, y))
+
+
+_ALL_MODES = []
+
+def _new_mode(name) -> str:
+    _ALL_MODES.append(name)
+    return name
 
 
 class Modes:
-    BLUR_AND_DEBLUR = "blur_deblur"
-    DEBLUR = "deblur"
+    DEBLUR = _new_mode("deblur")
+    BLUR_AND_DEBLUR = _new_mode("blur_deblur")
+
+    @staticmethod
+    def all_modes():
+        return _ALL_MODES
 
 
 class MainWindow:
 
     def __init__(self, size=(640, 480)):
         self.state: State = State()
-        self.view_mode = Modes.DEBLUR
+
+        # viewing options
+        self.view_mode = Modes.all_modes()[0]
+        self.autoplay = True
+        self.hide_controls = False
+        self.integer_upscale = False
+
         self._base_size = size
-        self._fps = 5
+        self._fps = 60
         self._clock = None
         self._ui_manager = None
 
@@ -124,9 +153,8 @@ class MainWindow:
     def _update(self, dt):
         self._ui_manager.update(dt)
 
-        simul_settings = self.state.simulation_settings
         simul = self.state.simulation
-        if simul_settings.autoplay and simul.get_iteration() < simul.get_iteration_limit():
+        if self.autoplay and simul.get_iteration() < simul.get_iteration_limit():
             simul.step()
 
         caption = f"DEBLUR [iter={simul.get_iteration()}, error={simul.get_error():.2f}]"
@@ -147,10 +175,10 @@ class MainWindow:
         screen = pygame.display.get_surface()
         full_rect = screen.get_rect()
 
-        top_ratio = 0.666
+        top_ratio = 0.666 if not self.hide_controls else 1.0
         image_rect = pygame.Rect(full_rect[0], full_rect[1], full_rect[2], full_rect[3] * top_ratio)
         split_3x1 = split_rect(image_rect, 3, horizontally=True)
-        images = [self.state.original_image, self.state.blurred_image, self.state.simulation.get_output_image()]
+        images = [self.state.original_image, self.state.target_image, self.state.simulation.get_output_image()]
 
         for i in range(len(split_3x1)):
             render_in_rect_responsibly(images[i], split_3x1[i], screen, integer_upscale_only=True)
@@ -159,16 +187,16 @@ class MainWindow:
         screen = pygame.display.get_surface()
         full_rect = screen.get_rect()
 
-        top_ratio = 0.666
+        top_ratio = 0.666 if not self.hide_controls else 1.0
         image_rect = pygame.Rect(full_rect[0], full_rect[1], full_rect[2], full_rect[3] * top_ratio)
         vert_split = split_rect(image_rect, 2, horizontally=False)
         split_2x2 = split_rect(vert_split[0], 2) + split_rect(vert_split[1], 2)
 
-        images = [self.state.blurred_image, self.state.simulation.get_output_image(),
+        images = [self.state.target_image, self.state.simulation.get_output_image(),
                   self.state.simulation.get_blurred_output_image(), self.state.simulation.get_error_image()]
 
         for i in range(len(split_2x2)):
-            render_in_rect_responsibly(images[i], split_2x2[i], screen, integer_upscale_only=True)
+            render_in_rect_responsibly(images[i], split_2x2[i], screen, integer_upscale_only=False)
 
     def run(self):
         pygame.init()
@@ -188,11 +216,18 @@ class MainWindow:
                     running = False
                 elif e.type == pygame.KEYDOWN:
                     if e.key == pygame.K_r:
-                        print("INFO: reseting deblur simulation")
+                        print("INFO: resetting deblur simulation [press R]")
                         self.state.simulation.reset()
                     elif e.key == pygame.K_p:
-                        self.state.simulation_settings.autoplay = not self.state.simulation_settings.autoplay
-                        print(f"INFO: setting autoplay to {self.state.simulation_settings.autoplay}")
+                        self.autoplay = not self.autoplay
+                        print(f"INFO: {'un' if self.autoplay else ''}paused simulation [toggle with P]")
+                    elif e.key == pygame.K_h:
+                        self.hide_controls = not self.hide_controls
+                        print(f"INFO: {'un' if not self.hide_controls else ''}hiding controls [toggle with H]")
+                    elif e.key == pygame.K_m:
+                        mode_idx = Modes.all_modes().index(self.view_mode)
+                        self.view_mode = Modes.all_modes()[(mode_idx + 1) % len(Modes.all_modes())]
+                        print(f"INFO: set viewing mode to {self.view_mode} [toggle with M]")
                     elif e.key == pygame.K_SPACE:
                         self.state.simulation.step()
                 self._ui_manager.process_events(e)
@@ -205,7 +240,13 @@ class MainWindow:
 
 if __name__ == "__main__":
     win = MainWindow()
-    win.state.set_original_image(pygame.image.load("data/3x3_circle_in_10x10_orig.png"))
-    win.state.set_blurred_image(pygame.image.load("data/3x3_circle_in_10x10.png"))
+    # win.state.set_original_image(pygame.image.load("data/3x3_circle_in_10x10_orig.png"))
+    # win.state.set_target_image(pygame.image.load("data/3x3_circle_in_10x10.png"))
+    win.state.set_original_image(pygame.image.load("data/splash.png"))
+    win.state.set_target_image(pygame.image.load("data/splash_blurred_15.png"))
+
+    win.state.simulation.deblur_settings.blur_type = "gaussian"
+    win.state.simulation.deblur_settings.radius = 25
+
     win.run()
 
