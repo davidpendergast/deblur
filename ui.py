@@ -1,3 +1,4 @@
+import enum
 
 import pygame
 import pygame_gui
@@ -112,20 +113,48 @@ def render_in_rect_responsibly(img: pygame.Surface, rect: pygame.Rect, dest: pyg
         dest.blit(scaled_img, (x, y))
 
 
-_ALL_MODES = []
+class Modes(enum.Enum):
 
-def _new_mode(name) -> str:
-    _ALL_MODES.append(name)
-    return name
+    DEBLUR = "deblur"
+    BLUR_AND_DEBLUR = "blur_deblur"
 
 
-class Modes:
-    DEBLUR = _new_mode("deblur")
-    BLUR_AND_DEBLUR = _new_mode("blur_deblur")
+class DeblurController:
 
-    @staticmethod
-    def all_modes():
-        return _ALL_MODES
+    def __init__(self, rect, manager, deblur_settings):
+        self.settings = deblur_settings
+
+        self.container = pygame_gui.elements.UIScrollingContainer(relative_rect=rect, manager=manager)
+        self.title_label = pygame_gui.elements.UILabel(relative_rect=pygame.Rect(0, 0, rect.width, 24), text="Deblur",
+                                                       manager=manager, container=self.container,
+                                                       anchors={"left": "left", "top": "top", "right": "right", "bottom": "bottom"})
+
+    def set_rect(self, rect):
+        if rect is None or rect.width <= 0 or rect.height <= 0:
+            self.container.hide()
+        else:
+            self.container.show()
+            self.container.set_relative_position(rect.topleft)
+            self.container.set_dimensions(rect.size)
+
+    def handle_event(self, event):
+        pass
+
+    def update(self, rect, dt):
+        pass
+
+
+class ViewItems(enum.Enum):
+
+    TARGET_IMAGE_PANE = "target_img"
+    ORIGINAL_IMAGE_PANE = "original_img"
+    OUTPUT_IMAGE_PANE = "output_img"
+    BLURRED_OUTPUT_IMAGE_PANE = "blurred_output_img"
+    ERROR_IMAGE = "error_img"
+
+    BLUR_CONTROLS = "blur_controls"
+    SIMULATION_CONTROLS = "simulation_controls"
+    DEBLUR_CONTROLS = "deblur_controls"
 
 
 class MainWindow:
@@ -134,10 +163,14 @@ class MainWindow:
         self.state: State = State()
 
         # viewing options
-        self.view_mode = Modes.all_modes()[0]
+        self.view_mode = Modes.DEBLUR
         self.autoplay = True
         self.hide_controls = False
         self.integer_upscale = False
+
+        self.blur_controls = None
+        self.simulation_controls = None
+        self.deblur_controls = None
 
         self._base_size = size
         self._fps = 60
@@ -147,10 +180,62 @@ class MainWindow:
     def set_view_mode(self, mode):
         self.view_mode = mode
 
-    def _pre_update(self, dt):
-        pass
+    def get_layout(self):
+        layout = {key: None for key in ViewItems}
+        full_rect = pygame.display.get_surface().get_rect()
 
-    def _update(self, dt):
+        if self.view_mode == Modes.DEBLUR:
+            top_ratio = 0.666 if not self.hide_controls else 1.0
+            image_rect = pygame.Rect(full_rect[0], full_rect[1], full_rect[2], full_rect[3] * top_ratio)
+            vert_split = split_rect(image_rect, 2, horizontally=False)
+            split_2x2 = split_rect(vert_split[0], 2) + split_rect(vert_split[1], 2)
+
+            layout[ViewItems.TARGET_IMAGE_PANE] = split_2x2[0]
+            layout[ViewItems.OUTPUT_IMAGE_PANE] = split_2x2[1]
+            layout[ViewItems.BLURRED_OUTPUT_IMAGE_PANE] = split_2x2[2]
+            layout[ViewItems.ERROR_IMAGE] = split_2x2[3]
+
+            if not self.hide_controls:
+                controls_rect = pygame.Rect(full_rect[0], image_rect[1] + image_rect[3], full_rect[2],
+                                            full_rect[1] + full_rect[3] - (image_rect[1] + image_rect[3]))
+                bottom_2x1 = split_rect(controls_rect, 2, horizontally=True)
+                layout[ViewItems.SIMULATION_CONTROLS] = bottom_2x1[0]
+                layout[ViewItems.DEBLUR_CONTROLS] = bottom_2x1[1]
+
+            return layout
+        elif self.view_mode == Modes.BLUR_AND_DEBLUR:
+            top_ratio = 0.666 if not self.hide_controls else 1.0
+            image_rect = pygame.Rect(full_rect[0], full_rect[1], full_rect[2], full_rect[3] * top_ratio)
+            split_3x1 = split_rect(image_rect, 3, horizontally=True)
+
+            layout[ViewItems.ORIGINAL_IMAGE_PANE] = split_3x1[0]
+            layout[ViewItems.TARGET_IMAGE_PANE] = split_3x1[1]
+            layout[ViewItems.OUTPUT_IMAGE_PANE] = split_3x1[2]
+
+            if not self.hide_controls:
+                controls_rect = pygame.Rect(full_rect[0], image_rect[1] + image_rect[3], full_rect[2],
+                                            full_rect[1] + full_rect[3] - (image_rect[1] + image_rect[3]))
+                bottom_3x1 = split_rect(controls_rect, 3, horizontally=True)
+
+                layout[ViewItems.BLUR_CONTROLS] = bottom_3x1[0]
+                layout[ViewItems.SIMULATION_CONTROLS] = bottom_3x1[1]
+                layout[ViewItems.DEBLUR_CONTROLS] = bottom_3x1[2]
+
+        return layout
+
+    def _update_ui_positions(self, layout):
+        controls = {
+            ViewItems.SIMULATION_CONTROLS: self.simulation_controls,
+            ViewItems.BLUR_CONTROLS: self.blur_controls,
+            ViewItems.DEBLUR_CONTROLS: self.deblur_controls
+        }
+        for key, rect in layout.items():
+            if key in controls:
+                if controls[key] is not None:
+                    controls[key].set_rect(rect)
+
+    def _update(self, dt, layout):
+        self._update_ui_positions(layout)
         self._ui_manager.update(dt)
 
         simul = self.state.simulation
@@ -160,43 +245,24 @@ class MainWindow:
         caption = f"DEBLUR [iter={simul.get_iteration()}, error={simul.get_error():.2f}]"
         pygame.display.set_caption(caption)
 
-    def _render(self):
+    def _render(self, layout):
         screen = pygame.display.get_surface()
         screen.fill((0, 0, 0))
 
-        if self.view_mode == Modes.BLUR_AND_DEBLUR:
-            self._render_blur_and_deblur_mode()
-        else:
-            self._render_deblur_mode()
-
+        self._render_layout(layout)
         self._ui_manager.draw_ui(screen)
 
-    def _render_blur_and_deblur_mode(self):
+    def _render_layout(self, layout):
+        images = {
+            ViewItems.TARGET_IMAGE_PANE: self.state.target_image,
+            ViewItems.OUTPUT_IMAGE_PANE: self.state.simulation.get_output_image(),
+            ViewItems.BLURRED_OUTPUT_IMAGE_PANE: self.state.simulation.get_blurred_output_image(),
+            ViewItems.ERROR_IMAGE: self.state.simulation.get_error_image()
+        }
         screen = pygame.display.get_surface()
-        full_rect = screen.get_rect()
-
-        top_ratio = 0.666 if not self.hide_controls else 1.0
-        image_rect = pygame.Rect(full_rect[0], full_rect[1], full_rect[2], full_rect[3] * top_ratio)
-        split_3x1 = split_rect(image_rect, 3, horizontally=True)
-        images = [self.state.original_image, self.state.target_image, self.state.simulation.get_output_image()]
-
-        for i in range(len(split_3x1)):
-            render_in_rect_responsibly(images[i], split_3x1[i], screen, integer_upscale_only=True)
-
-    def _render_deblur_mode(self):
-        screen = pygame.display.get_surface()
-        full_rect = screen.get_rect()
-
-        top_ratio = 0.666 if not self.hide_controls else 1.0
-        image_rect = pygame.Rect(full_rect[0], full_rect[1], full_rect[2], full_rect[3] * top_ratio)
-        vert_split = split_rect(image_rect, 2, horizontally=False)
-        split_2x2 = split_rect(vert_split[0], 2) + split_rect(vert_split[1], 2)
-
-        images = [self.state.target_image, self.state.simulation.get_output_image(),
-                  self.state.simulation.get_blurred_output_image(), self.state.simulation.get_error_image()]
-
-        for i in range(len(split_2x2)):
-            render_in_rect_responsibly(images[i], split_2x2[i], screen, integer_upscale_only=False)
+        for key, rect in layout.items():
+            if key in images and rect is not None and rect.width >= 0 and rect.height >= 0:
+                render_in_rect_responsibly(images[key], rect, screen, integer_upscale_only=self.integer_upscale)
 
     def run(self):
         pygame.init()
@@ -206,11 +272,12 @@ class MainWindow:
         self._clock = pygame.time.Clock()
         self._ui_manager = pygame_gui.UIManager(self._base_size)
 
+        self.deblur_controls = DeblurController(pygame.Rect(100, 100, 200, 200), self._ui_manager, self.state.get_deblur_settings())
+
         running = True
         while running:
             dt = self._clock.tick(self._fps) / 1000.0
 
-            self._pre_update(dt)
             for e in pygame.event.get():
                 if e.type == pygame.QUIT:
                     running = False
@@ -225,15 +292,21 @@ class MainWindow:
                         self.hide_controls = not self.hide_controls
                         print(f"INFO: {'un' if not self.hide_controls else ''}hiding controls [toggle with H]")
                     elif e.key == pygame.K_m:
-                        mode_idx = Modes.all_modes().index(self.view_mode)
-                        self.view_mode = Modes.all_modes()[(mode_idx + 1) % len(Modes.all_modes())]
+                        all_modes = [m for m in Modes]
+                        mode_idx = all_modes.index(self.view_mode)
+                        self.view_mode = all_modes[(mode_idx + 1) % len(all_modes)]
                         print(f"INFO: set viewing mode to {self.view_mode} [toggle with M]")
+                    elif e.key == pygame.K_i:
+                        self.integer_upscale = not self.integer_upscale
+                        print(f"INFO: integer upscaling only set to {self.integer_upscale} [toggle with I]")
                     elif e.key == pygame.K_SPACE:
                         self.state.simulation.step()
                 self._ui_manager.process_events(e)
 
-            self._update(dt)
-            self._render()
+            layout = self.get_layout()
+
+            self._update(dt, layout)
+            self._render(layout)
 
             pygame.display.flip()
 
@@ -246,7 +319,7 @@ if __name__ == "__main__":
     win.state.set_target_image(pygame.image.load("data/splash_blurred_15.png"))
 
     win.state.simulation.deblur_settings.blur_type = "gaussian"
-    win.state.simulation.deblur_settings.radius = 25
+    win.state.simulation.deblur_settings.radius = 15
 
     win.run()
 
