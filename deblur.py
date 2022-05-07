@@ -288,8 +288,9 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
             combo = numpy.maximum(tgt_minus_blurred_img_array, blurred_img_minus_tgt_array)
             self.current_error = numpy.mean(combo)
 
+            max_error = numpy.max(combo)
             if self.show_relative_error() and self.current_error > 0:
-                combo[:] = combo * min(16, (128 / self.current_error))
+                combo[:] = combo * (255 / max_error)
 
             self.combined_error_image = self.img.copy()
             pygame.surfarray.blit_array(self.combined_error_image, combo)
@@ -327,7 +328,7 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
 if __name__ == "__main__":
     pygame.init()
 
-    simulation = Simulation("data/splash_blurred_15.png", blurs.get_blur_func("box"), 3, original_file="data/splash.png", intensity_range=(4, 3), iterations=100)
+    simulation = Simulation("data/splash_blurred_15.png", blurs.box, 3, original_file="data/splash.png", intensity_range=(4, 3), iterations=100)
     # simulation = Simulation("data/3x3_circle_in_10x10.png", get_box_filter_func(), 3, original_file="data/3x3_circle_in_10x10_orig.png")
 
     W, H = simulation.target.get_size()

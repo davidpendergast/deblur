@@ -32,9 +32,29 @@ def gaussian(img: pygame.Surface, radius, params=None) -> pygame.Surface:
     return res
 
 
+def median(img: pygame.Surface, radius, params=None):
+    """
+        Performs a "Median" blur.
+    """
+    # radius has to be odd or else cv2 will complain.
+    r = radius if radius % 2 == 1 else radius + 1
+
+    res = img.copy()
+    px = pygame.surfarray.array3d(res)
+    cv2.medianBlur(px, r, dst=px)
+    pygame.surfarray.blit_array(res, px)
+    return res
+
+
+BOX_FILTER = "box filter"
+GAUSSIAN = "gaussian"
+MEDIAN = "median filter"
+
+
 _ALL_BLURS = {
-    "box": box,
-    "gaussian": gaussian
+    BOX_FILTER: box,
+    GAUSSIAN: gaussian,
+    MEDIAN: median
 }
 
 

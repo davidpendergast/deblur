@@ -162,7 +162,8 @@ class BlurController:
             list(map(title_case, blurs.get_all_blurs())),
             title_case(self.settings.blur_type),
             pygame.Rect(0, 24, rect.width, 24),
-            manager, container=self.panel, object_id=f"#{de}blur_blur_type"
+            manager, container=self.panel,
+            object_id=f"#{de}blur_blur_type"
         )
 
         self.radius_slider = pygame_gui.elements.UIHorizontalSlider(
@@ -170,18 +171,16 @@ class BlurController:
             container=self.panel, click_increment=1, object_id=f"#{de}blur_radius")
 
         self.radius_label = pygame_gui.elements.UILabel(
-            pygame.Rect(0, 48, rect.width, 24), f"Radius: {self.settings.radius}",
+            pygame.Rect(0, 48, rect.width, 24), f"Radius: {self.settings.radius} px",
             manager=manager, container=self.panel,
         )
 
         self._item_layouts = [
             (self.title_label, 24),
             (None, 4),
-            (self.blur_type_selector, 24),
-            (None, 4),
-            (self.radius_label, 24),
+            ([(self.blur_type_selector, 0.5), (self.radius_label, 0.5)], 24),
             (self.radius_slider, 24),
-            (None, 4)
+            (None, 48)
         ]
         self.set_rect(rect)
 
@@ -195,7 +194,22 @@ class BlurController:
 
             y = 0
             for (item, height) in self._item_layouts:
-                if item is not None:
+                if isinstance(item, list):
+                    exact_space = 0
+                    total_weight = 0
+                    for (subitem, weight) in item:
+                        if isinstance(weight, int):
+                            exact_space += weight
+                        elif isinstance(weight, float):
+                            total_weight += weight
+                    x = 0
+                    flex_space = max(0, rect.width - exact_space)
+                    for (subitem, weight) in item:
+                        subitem_width = weight if isinstance(weight, int) else round(flex_space * weight / total_weight)
+                        subitem.set_relative_position((x, y))
+                        subitem.set_dimensions((subitem_width, height))
+                        x += subitem_width
+                elif item is not None:
                     item.set_relative_position((0, y))
                     item.set_dimensions((rect.width, height))
                 y += height
@@ -204,7 +218,7 @@ class BlurController:
         return sum(map(lambda x: x[1], self._item_layouts))
 
     def update(self, rect):
-        self.radius_label.set_text(f"Radius: {self.settings.radius}")
+        self.radius_label.set_text(f"Radius: {self.settings.radius} px")
         self.set_rect(rect)
 
 
