@@ -221,6 +221,9 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
     def get_correction_intensity(self, iteration):
         raise NotImplementedError()
 
+    def show_relative_error(self):
+        raise NotImplementedError()
+
     def get_iteration(self) -> int:
         return self.iter_count
 
@@ -250,11 +253,11 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
         self._calc_derived_images()
         self.iter_count += 1
 
-    def reset(self):
-        self.iter_count = 0
-        self.current_error = -1.0
+    def reset(self, iter_count=True, img=True):
+        if iter_count:
+            self.iter_count = 0
 
-        self.img = self.get_initial_guess()
+        self.img = self.get_initial_guess() if (self.img is None or img) else self.img
         self.blurred_img = None if self.img is None else self.do_blur(self.img)
 
         self.target_minus_blurred_img: pygame.Surface = None
@@ -262,6 +265,7 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
         self.blurred_img_minus_target: pygame.Surface = None
         self.blurred_img_minus_target_blurred: pygame.Surface = None
         self.combined_error_image: pygame.Surface = None
+        self.current_error = -1.0
 
         self._calc_derived_images()
 
@@ -283,6 +287,10 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
 
             combo = numpy.maximum(tgt_minus_blurred_img_array, blurred_img_minus_tgt_array)
             self.current_error = numpy.mean(combo)
+
+            if self.show_relative_error() and self.current_error > 0:
+                combo[:] = combo * min(16, (128 / self.current_error))
+
             self.combined_error_image = self.img.copy()
             pygame.surfarray.blit_array(self.combined_error_image, combo)
         else:

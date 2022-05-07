@@ -18,6 +18,9 @@ class UiControlledIterativeGhastDeblurrer(deblur.AbstractIterativeGhastDeblurrer
     def get_correction_intensity(self, iteration):
         return self.settings.get_correction_intensity(iteration)
 
+    def show_relative_error(self):
+        return self.settings.show_relative_error
+
     def do_blur(self, surf: pygame.Surface, strength=1.0) -> pygame.Surface:
         return self.deblur_settings.do_blur(surf, strength=strength)
 
@@ -74,7 +77,7 @@ class BlurSettings:
 
     def __init__(self):
         self.blur_type = "gaussian"
-        self.max_radius = 50
+        self.max_radius = 100
         self.radius = 15
         self.bonus_params = {}
 
@@ -90,6 +93,7 @@ class SimulationSettings:
         self.start_intensity = 4
         self.end_intensity = 3
         self.intensity_curve = "linear"
+        self.show_relative_error = True
 
     def get_correction_intensity(self, iterations):
         if iterations >= self.iteration_limit:
@@ -125,6 +129,10 @@ def render_in_rect_responsibly(img: pygame.Surface, rect: pygame.Rect, dest: pyg
         dest.blit(scaled_img, (x, y))
 
 
+def title_case(text):
+    return " ".join(map(lambda w: w[0:1].upper() + w[1:] if len(w) >= 2 else w.upper(), text.split(" ")))
+
+
 class Modes(enum.Enum):
 
     DEBLUR = "deblur"
@@ -147,8 +155,8 @@ class BlurController:
         )
 
         self.blur_type_selector = pygame_gui.elements.UIDropDownMenu(
-            blurs.get_all_blurs(),
-            self.settings.blur_type,
+            list(map(title_case, blurs.get_all_blurs())),
+            title_case(self.settings.blur_type),
             pygame.Rect(0, 24, rect.width, 24),
             manager, container=self.panel, object_id=f"#{de}blur_blur_type"
         )
@@ -341,17 +349,19 @@ class MainWindow:
         if e.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
             if "#deblur_blur_type" in e.ui_object_id:
                 self.state.get_deblur_settings().blur_type = e.text
-                self.state.simulation.iter_count = 0
+                self.state.simulation.reset(iter_count=True, img=False)
             elif "#blur_blur_type" in e.ui_object_id:
                 self.state.get_blur_settings().blur_type = e.text
                 self.state.regenerate_target_image()
         elif e.type == pygame_gui.UI_HORIZONTAL_SLIDER_MOVED:
             if "#deblur_radius" in e.ui_object_id:
-                self.state.get_deblur_settings().radius = int(e.value)
-                self.state.simulation.iter_count = 0
+                if int(e.value) != self.state.get_deblur_settings().radius:
+                    self.state.get_deblur_settings().radius = int(e.value)
+                    self.state.simulation.reset(iter_count=True, img=False)
             elif "#blur_radius" in e.ui_object_id:
-                self.state.get_blur_settings().radius = int(e.value)
-                self.state.regenerate_target_image()
+                if int(e.value) != self.state.get_blur_settings().radius:
+                    self.state.get_blur_settings().radius = int(e.value)
+                    self.state.regenerate_target_image()
 
     def run(self):
         pygame.init()
@@ -379,15 +389,20 @@ class MainWindow:
                     if e.key == pygame.K_r:
                         print("INFO: resetting deblur simulation [press R]")
                         self.state.simulation.reset()
+                    elif e.key == pygame.K_e:
+                        sim_settings = self.state.get_simulation_settings()
+                        sim_settings.show_relative_error = not sim_settings.show_relative_error
+                        print(f"INFO: set relative error mode to {sim_settings.show_relative_error} [toggle with E]")
+                        self.state.simulation.reset(iter_count=False, img=False)  # just refresh derived images
                     elif e.key == pygame.K_RETURN:
-                        self.state.simulation.iter_count = 0
+                        self.state.simulation.reset(iter_count=True, img=False)
                     elif e.key == pygame.K_LEFT:
                         self.state.get_deblur_settings().radius = max(0, self.state.get_deblur_settings().radius - 1)
-                        self.state.simulation.iter_count = 0
+                        self.state.simulation.reset(iter_count=True, img=False)
                     elif e.key == pygame.K_RIGHT:
                         self.state.get_deblur_settings().radius = min(self.state.get_deblur_settings().max_radius,
                                                                       self.state.get_deblur_settings().radius + 1)
-                        self.state.simulation.iter_count = 0
+                        self.state.simulation.reset(iter_count=True, img=False)
                     elif e.key == pygame.K_p:
                         self.autoplay = not self.autoplay
                         print(f"INFO: {'un' if self.autoplay else ''}paused simulation [toggle with P]")

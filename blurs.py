@@ -43,6 +43,7 @@ def get_all_blurs():
 
 
 def get_blur_func(name):
+    name = name.lower() if isinstance(name, str) else name
     if name in _ALL_BLURS:
         return _ALL_BLURS[name]
     else:
