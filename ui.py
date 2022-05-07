@@ -82,8 +82,12 @@ class BlurSettings:
         self.bonus_params = {}
 
     def do_blur(self, surf, strength=1.0):
-        my_blur = blurs.get_blur_func(self.blur_type)
-        return my_blur(surf, round(strength * self.radius), params=self.bonus_params)
+        effective_radius = round(strength * self.radius)
+        if effective_radius > 0:
+            my_blur = blurs.get_blur_func(self.blur_type)
+            return my_blur(surf, effective_radius, params=self.bonus_params)
+        else:
+            return surf.copy()
 
 
 class SimulationSettings:
