@@ -224,6 +224,9 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
     def get_correction_intensity(self, iteration):
         raise NotImplementedError()
 
+    def get_backpropagation_blur_strength(self) -> float:
+        return 1.0
+
     def show_relative_error(self):
         raise NotImplementedError()
 
@@ -274,32 +277,42 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
 
     def _calc_derived_images(self):
         self.blurred_img = None if self.img is None else self.do_blur(self.img)
-        self.target_minus_blurred_img, self.blurred_img_minus_target = self._calc_distance_in_both_directions(
-            self.get_blurred_output_image(), self.get_target_image())
 
-        self.target_minus_blurred_img_blurred = None if self.target_minus_blurred_img is None else self.do_blur(self.target_minus_blurred_img)
-        self.blurred_img_minus_target_blurred = None if self.blurred_img_minus_target is None else self.do_blur(self.blurred_img_minus_target)
-        if self.target_minus_blurred_img is not None and self.blurred_img_minus_target is not None:
-            # img_array = pygame.surfarray.pixels3d(self.img)
-            # blurred_img_array = pygame.surfarray.pixels3d(self.blurred_img)
-            # tgt_array = pygame.surfarray.pixels3d(self.get_target_image())
-            tgt_minus_blurred_img_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img)
-            blurred_img_minus_tgt_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target)
-            # tgt_minus_blurred_img_blurred_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img_blurred)
-            # blurred_img_minus_tgt_blurred_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target_blurred)
-
-            combo = numpy.maximum(tgt_minus_blurred_img_array, blurred_img_minus_tgt_array)
-            self.current_error = numpy.mean(combo)
-
-            max_error = numpy.max(combo)
-            if self.show_relative_error() and self.current_error > 0:
-                combo[:] = combo * (255 / max_error)
-
-            self.combined_error_image = self.img.copy()
-            pygame.surfarray.blit_array(self.combined_error_image, combo)
-        else:
+        if self.img is None or self.get_target_image() is None:
+            self.blurred_img_minus_target = None
+            self.target_minus_blurred_img = None
+            self.target_minus_blurred_img_blurred = None
+            self.blurred_img_minus_target_blurred = None
             self.combined_error_image = None
             self.current_error = -1
+            return
+
+        self.target_minus_blurred_img, self.blurred_img_minus_target = self._calc_distance_in_both_directions(
+            self.blurred_img, self.get_target_image())
+
+        bp_blur_strength = self.get_backpropagation_blur_strength()
+        self.target_minus_blurred_img_blurred = self.do_blur(self.target_minus_blurred_img, strength=bp_blur_strength)
+        self.blurred_img_minus_target_blurred = self.do_blur(self.blurred_img_minus_target, strength=bp_blur_strength)
+
+        # img_array = pygame.surfarray.pixels3d(self.img)
+        # blurred_img_array = pygame.surfarray.pixels3d(self.blurred_img)
+        # tgt_array = pygame.surfarray.pixels3d(self.get_target_image())
+        tgt_minus_blurred_img_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img)
+        blurred_img_minus_tgt_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target)
+        # tgt_minus_blurred_img_blurred_array = pygame.surfarray.pixels3d(self.target_minus_blurred_img_blurred)
+        # blurred_img_minus_tgt_blurred_array = pygame.surfarray.pixels3d(self.blurred_img_minus_target_blurred)
+
+        combo = numpy.maximum(tgt_minus_blurred_img_array, blurred_img_minus_tgt_array)
+        self.current_error = numpy.mean(combo)
+
+        max_error = numpy.max(combo)
+        if self.show_relative_error() and self.current_error > 0:
+            combo[:] = combo * (255 / max_error)
+
+        self.combined_error_image = self.img.copy()
+        pygame.surfarray.blit_array(self.combined_error_image, combo)
+
+
 
     def _calc_distance_in_both_directions(self, img, target) -> typing.Tuple[pygame.Surface, pygame.Surface]:
         if img is None or target is None:

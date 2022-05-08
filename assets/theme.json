@@ -8,5 +8,13 @@
             "bold": "0",
             "italic": "0"
         }
-    }
+    },
+	
+	"@left_aligned":
+	{
+		"misc":
+         {
+             "text_horiz_alignment": "left"
+         }
+	}
 }

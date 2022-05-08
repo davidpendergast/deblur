@@ -21,6 +21,9 @@ class UiControlledIterativeGhastDeblurrer(deblur.AbstractIterativeGhastDeblurrer
     def show_relative_error(self):
         return self.settings.show_relative_error
 
+    def get_backpropagation_blur_strength(self) -> float:
+        return self.deblur_settings.backpropagation_blur_strength
+
     def do_blur(self, surf: pygame.Surface, strength=1.0) -> pygame.Surface:
         return self.deblur_settings.do_blur(surf, strength=strength)
 
@@ -81,6 +84,7 @@ class BlurSettings:
         self.blur_type = "gaussian"
         self.max_radius = 100
         self.radius = 15
+        self.backpropagation_blur_strength = 1.0
         self.bonus_params = {}
 
     def do_blur(self, surf, strength=1.0):
@@ -145,27 +149,36 @@ class Modes(enum.Enum):
     BLUR_AND_DEBLUR = "blur_deblur"
 
 
+LINE_HEIGHT = 24
+SHORT_LABEL_WIDTH = 6 * 24
+SMALL_GAP = 4
+
+
 class ControlPanel:
 
     def __init__(self, rect, manager):
         self.panel = self.build_panel(rect, manager)
         self.item_layouts = []
 
+        self.insets = (5, 0, 10, 0)
+
     def build_panel(self, rect, manager):
         return pygame_gui.elements.UIPanel(rect, starting_layer_height=2, manager=manager)
 
     def update(self, rect: pygame.Rect):
-        if rect is None or rect.width <= 0 or rect.height <= 0:
+        if rect is None or rect.width <= self.insets[0] * 2 or rect.height <= self.insets[1] * 2:
             self.panel.hide()
         else:
             self.panel.show()
             self.panel.set_relative_position(rect.topleft)
             self.panel.set_dimensions(rect.size)
 
-            rect = rect.copy()
-            rect.width = max(0, rect.width - 4)
+            rect = pygame.Rect(rect.x + self.insets[0],
+                               rect.y + self.insets[1],
+                               rect.width - (self.insets[0] + self.insets[2]),
+                               rect.height - (self.insets[1] + self.insets[3]))
 
-            y = 0
+            y = self.insets[1]
             for (item, height) in self.item_layouts:
                 if isinstance(item, list):
                     exact_space = 0
@@ -175,7 +188,7 @@ class ControlPanel:
                             exact_space += weight
                         elif isinstance(weight, float):
                             total_weight += weight
-                    x = 0
+                    x = self.insets[0]
                     flex_space = max(0, rect.width - exact_space)
                     for (subitem, weight) in item:
                         subitem_width = weight if isinstance(weight, int) else round(flex_space * weight / total_weight)
@@ -183,7 +196,7 @@ class ControlPanel:
                         subitem.set_dimensions((subitem_width, height))
                         x += subitem_width
                 elif item is not None:
-                    item.set_relative_position((0, y))
+                    item.set_relative_position((self.insets[0], y))
                     item.set_dimensions((rect.width, height))
                 y += height
 
@@ -223,38 +236,63 @@ class BlurControlPanel(ControlPanel):
         self.radius_label = pygame_gui.elements.UILabel(
             pygame.Rect(0, 48, rect.width, 24), f"Radius: {self.settings.radius}",
             manager=manager, container=self.panel,
+            object_id=pygame_gui.core.ObjectID(class_id="@left_aligned", object_id="label")
         )
 
         if self.is_deblur:
-            self.correction_intensity_label = pygame_gui.elements.UILabel(
-                rect, f"Correction: -1 -> -1",
+            self.advanced_options_label = pygame_gui.elements.UILabel(
+                rect, "Advanced Options",
                 manager=manager, container=self.panel,
             )
 
+            self.start_intensity_label = pygame_gui.elements.UILabel(
+                rect, "Start Intensity: -1",
+                manager=manager, container=self.panel,
+                object_id=pygame_gui.core.ObjectID(class_id="@left_aligned", object_id="label")
+            )
+
+            self.end_intensity_label = pygame_gui.elements.UILabel(
+                rect, "End Intensity: -1",
+                manager=manager, container=self.panel,
+                object_id=pygame_gui.core.ObjectID(class_id="@left_aligned", object_id="label")
+            )
+
             self.correction_intensity_lower_slider = pygame_gui.elements.UIHorizontalSlider(
-                rect, int(self.state.get_simulation_settings().start_intensity * 10), (0, 100), manager,
-                container=self.panel, click_increment=1, object_id=f"#lower_intensity_slider"
+                rect, int(self.state.get_simulation_settings().start_intensity * 10), (0, 50), manager,
+                container=self.panel, click_increment=1, object_id="#lower_intensity_slider"
             )
 
             self.correction_intensity_upper_slider = pygame_gui.elements.UIHorizontalSlider(
-                rect, int(self.state.get_simulation_settings().end_intensity * 10), (0, 100), manager,
-                container=self.panel, click_increment=1, object_id=f"#upper_intensity_slider"
+                rect, int(self.state.get_simulation_settings().end_intensity * 10), (0, 50), manager,
+                container=self.panel, click_increment=1, object_id="#upper_intensity_slider"
+            )
+
+            self.backpropagation_blur_strength_label = pygame_gui.elements.UILabel(
+                rect, "Anti-Blur: 100%", manager=manager, container=self.panel,
+                object_id=pygame_gui.core.ObjectID(class_id="@left_aligned", object_id="label")
+            )
+
+            self.backpropagation_blur_strength_slider = pygame_gui.elements.UIHorizontalSlider(
+                rect, int(self.state.get_deblur_settings().backpropagation_blur_strength * 100), (0, 150), manager,
+                container=self.panel, click_increment=1, object_id="#bp_blur_strength_slider",
             )
 
         self.item_layouts = [
-            (self.title_label, 24),
-            (None, 4),
-            ([(self.blur_type_selector, 0.5), (self.radius_label, 0.5)], 24),
-            (self.radius_slider, 24),
+            (self.title_label, LINE_HEIGHT),
+            (None, SMALL_GAP),
+            (self.blur_type_selector, LINE_HEIGHT),
+            ([(self.radius_label, SHORT_LABEL_WIDTH), (self.radius_slider, 1.0)], LINE_HEIGHT)
         ]
 
         if self.is_deblur:
             self.item_layouts.extend([
-                (None, 4),
-                (self.correction_intensity_label, 24),
-                ([(self.correction_intensity_lower_slider, 0.5), (self.correction_intensity_upper_slider, 0.5)], 24),
+                (None, SMALL_GAP),
+                (self.advanced_options_label, LINE_HEIGHT),
+                ([(self.start_intensity_label, SHORT_LABEL_WIDTH), (self.correction_intensity_lower_slider, 1.0)], LINE_HEIGHT),
+                ([(self.end_intensity_label, SHORT_LABEL_WIDTH), (self.correction_intensity_upper_slider, 1.0)], LINE_HEIGHT),
+                ([(self.backpropagation_blur_strength_label, SHORT_LABEL_WIDTH), (self.backpropagation_blur_strength_slider, 1.0)], LINE_HEIGHT)
             ])
-        self.item_layouts.append((None, 4))
+        self.item_layouts.append((None, SMALL_GAP))
 
         self.update(rect)
 
@@ -263,8 +301,11 @@ class BlurControlPanel(ControlPanel):
 
         if self.is_deblur:
             simul_settings = self.state.get_simulation_settings()  # TODO this should probably be in blur settings
-            self.correction_intensity_label.set_text(
-                f"Correction Intensity: {simul_settings.start_intensity:.1f} -> {simul_settings.end_intensity:.1f}")
+            self.start_intensity_label.set_text(f"High Power: {simul_settings.start_intensity:.1f}")
+            self.end_intensity_label.set_text(  f"Low Power:  {simul_settings.end_intensity:.1f}")
+
+            bp_blur_str = int(self.state.get_deblur_settings().backpropagation_blur_strength * 100)
+            self.backpropagation_blur_strength_label.set_text( f"Anti-Blur:  {bp_blur_str}%")
 
         super().update(rect)
 
@@ -309,7 +350,7 @@ class SimulationControlPanel(ControlPanel):
         )
 
         self.reset_button = pygame_gui.elements.UIButton(
-            rect, "⏮", manager, container=self.panel,
+            rect, "⏩", manager, container=self.panel,
             tool_tip_text="Reset iterations to 0 (but leave image unchanged).",
             object_id=pygame_gui.core.ObjectID(
                 class_id="@emoji_label",
@@ -327,7 +368,7 @@ class SimulationControlPanel(ControlPanel):
         )
 
         self.step_button = pygame_gui.elements.UIButton(
-            rect, "⏩", manager, container=self.panel,
+            rect, "⏭", manager, container=self.panel,
             tool_tip_text="Perform a single iteration.",
             object_id=pygame_gui.core.ObjectID(
                 class_id="@emoji_label",
@@ -346,7 +387,8 @@ class SimulationControlPanel(ControlPanel):
         )
 
         self.max_iterations_label = pygame_gui.elements.UILabel(
-            rect, "Max Iterations: ", manager, container=self.panel
+            rect, "Iteration Limit: ", manager, container=self.panel,
+            object_id=pygame_gui.core.ObjectID(class_id="@left_aligned", object_id="label")
         )
 
         self.max_iterations_slider = pygame_gui.elements.UIHorizontalSlider(
@@ -355,18 +397,19 @@ class SimulationControlPanel(ControlPanel):
         )
 
         self.item_layouts = [
-            (self.title_label, 24),
-            (None, 4),
-            ([(self.iterations_label, 0.5), (self.error_label, 0.5)], 24),
+            (self.title_label, LINE_HEIGHT),
+            (None, SMALL_GAP),
+            ([(self.iterations_label, 0.5), (self.error_label, 0.5)], LINE_HEIGHT),
             ([
                 (self.stop_button, 1.0),
                 (self.restart_button, 1.0),
-                (self.reset_button, 1.0),
                 (self.play_pause_button, 1.0),
+                (self.reset_button, 1.0),
                 (self.step_button, 1.0)
-            ], 24),
-            ([(self.max_iterations_label, 24 * 6), (self.max_iterations_slider, 1.0)], 24),
-            (None, 48)
+            ], LINE_HEIGHT),
+            (None, SMALL_GAP),
+            ([(self.max_iterations_label, SHORT_LABEL_WIDTH), (self.max_iterations_slider, 1.0)], LINE_HEIGHT),
+            (None, LINE_HEIGHT * 2)
         ]
 
         self.update(rect)
@@ -535,11 +578,16 @@ class MainWindow:
             elif "#simulation_iteration_limit" in e.ui_object_id:
                 if int(e.value) != self.state.get_simulation_settings().iteration_limit:
                     self.state.get_simulation_settings().iteration_limit = int(e.value)
+            elif "#bp_blur_strength_slider" in e.ui_object_id:
+                if int(e.value) != int(self.state.get_deblur_settings().backpropagation_blur_strength * 100):
+                    self.state.get_deblur_settings().backpropagation_blur_strength = e.value / 100.0
+                    self.state.simulation.reset(iter_count=True, img=False)
         elif e.type == pygame_gui.UI_BUTTON_PRESSED:
             if "#simulation_play_pause" in e.ui_object_id:
                 self.state.autoplay = not self.state.autoplay
             elif "#simulation_reset" in e.ui_object_id:
                 self.state.simulation.reset(iter_count=True, img=False)
+                self.state.autoplay = True
             elif "#simulation_restart" in e.ui_object_id:
                 self.state.simulation.reset(iter_count=True, img=True)
                 self.state.autoplay = True
