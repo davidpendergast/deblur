@@ -44,6 +44,10 @@ class State:
         self.simulation = UiControlledIterativeGhastDeblurrer(simulation_settings or SimulationSettings(),
                                                               deblur_settings or BlurSettings())
 
+        # display settings
+        self.view_mode = Modes.DEBLUR
+        self.hide_controls = False
+        self.integer_upscale = False
         self.autoplay = True
 
     def set_original_image(self, surf: pygame.Surface, filename: str = None):
@@ -118,10 +122,10 @@ class SimulationSettings:
 
 def split_rect(rect: pygame.Rect, n: int, horizontally=True) -> typing.List[pygame.Rect]:
     if horizontally:
-        xs = [int(rect[2] / n * i) for i in range(n + 1)]
+        xs = [rect[0] + int(rect[2] / n * i) for i in range(n + 1)]
         return [pygame.Rect(xs[i], rect[1], xs[i + 1] - xs[i], rect[3]) for i in range(n)]
     else:
-        ys = [int(rect[3] / n * i) for i in range(n + 1)]
+        ys = [rect[1] + int(rect[3] / n * i) for i in range(n + 1)]
         return [pygame.Rect(rect[0], ys[i], rect[2], ys[i + 1] - ys[i]) for i in range(n)]
 
 
@@ -425,6 +429,34 @@ class SimulationControlPanel(ControlPanel):
         super().update(rect)
 
 
+class TopControlPanel(ControlPanel):
+
+    def __init__(self, rect, manager, state):
+        super().__init__(rect, manager)
+        self.state = state
+        self.insets = (0, 0, 0, 0)
+
+        all_modes = [str(m) for m in Modes]
+        self.view_mode_selector = pygame_gui.elements.UIDropDownMenu(
+            list(map(title_case, all_modes)),
+            title_case(str(self.state.view_mode)),
+            pygame.Rect(0, 24, rect.width, 24),
+            manager, container=self.panel,
+            object_id=f"#view_mode_selector"
+        )
+
+        self.item_layouts = [
+            ([
+                 (self.view_mode_selector, SHORT_LABEL_WIDTH),
+             ], LINE_HEIGHT)
+        ]
+
+        self.update(rect)
+
+    def update(self, rect: pygame.Rect):
+        super().update(rect)
+
+
 class ViewItems(enum.Enum):
 
     TARGET_IMAGE_PANE = "target_img"
@@ -433,6 +465,7 @@ class ViewItems(enum.Enum):
     BLURRED_OUTPUT_IMAGE_PANE = "blurred_output_img"
     ERROR_IMAGE_PANE = "error_img"
 
+    TOP_TOOLBAR = "top_toolbar"
     BLUR_CONTROLS = "blur_controls"
     SIMULATION_CONTROLS = "simulation_controls"
     DEBLUR_CONTROLS = "deblur_controls"
@@ -443,11 +476,7 @@ class MainWindow:
     def __init__(self, size=(960, 480)):
         self.state: State = State()
 
-        # viewing options
-        self.view_mode = Modes.DEBLUR
-        self.hide_controls = False
-        self.integer_upscale = False
-
+        self.top_toolbar = None
         self.blur_controls = None
         self.simulation_controls = None
         self.deblur_controls = None
@@ -458,16 +487,23 @@ class MainWindow:
         self._ui_manager = None
 
     def set_view_mode(self, mode):
-        self.view_mode = mode
+        self.state.view_mode = mode
 
     def get_layout(self):
         layout = {key: None for key in ViewItems}
         full_rect = pygame.display.get_surface().get_rect()
 
-        if self.view_mode == Modes.DEBLUR:
+        if not self.state.hide_controls:
+            top_toolbar_rect = pygame.Rect(0, 0, full_rect.width, self.top_toolbar.get_minimum_height())
+            full_rect = pygame.Rect(full_rect.x,
+                                    full_rect.y + top_toolbar_rect.y + top_toolbar_rect.height,
+                                    full_rect.width, full_rect.height)
+            layout[ViewItems.TOP_TOOLBAR] = top_toolbar_rect
+
+        if self.state.view_mode == Modes.DEBLUR:
             controls_height = max(self.simulation_controls.get_minimum_height(),
                                   self.deblur_controls.get_minimum_height())
-            image_rect_height = full_rect[3] if self.hide_controls else full_rect[3] - controls_height
+            image_rect_height = full_rect[3] if self.state.hide_controls else full_rect[3] - controls_height
             image_rect = pygame.Rect(full_rect[0], full_rect[1], full_rect[2], image_rect_height)
             vert_split = split_rect(image_rect, 2, horizontally=False)
             split_2x2 = split_rect(vert_split[0], 2) + split_rect(vert_split[1], 2)
@@ -477,7 +513,7 @@ class MainWindow:
             layout[ViewItems.BLURRED_OUTPUT_IMAGE_PANE] = split_2x2[2]
             layout[ViewItems.ERROR_IMAGE_PANE] = split_2x2[3]
 
-            if not self.hide_controls:
+            if not self.state.hide_controls:
                 controls_rect = pygame.Rect(full_rect[0], image_rect[1] + image_rect[3], full_rect[2],
                                             full_rect[1] + full_rect[3] - (image_rect[1] + image_rect[3]))
                 bottom_2x1 = split_rect(controls_rect, 2, horizontally=True)
@@ -485,11 +521,11 @@ class MainWindow:
                 layout[ViewItems.DEBLUR_CONTROLS] = bottom_2x1[1]
 
             return layout
-        elif self.view_mode == Modes.BLUR_AND_DEBLUR:
+        elif self.state.view_mode == Modes.BLUR_AND_DEBLUR:
             controls_height = max(self.blur_controls.get_minimum_height(),
                                   self.simulation_controls.get_minimum_height(),
                                   self.deblur_controls.get_minimum_height())
-            image_rect_height = full_rect[3] if self.hide_controls else full_rect[3] - controls_height
+            image_rect_height = full_rect[3] if self.state.hide_controls else full_rect[3] - controls_height
             image_rect = pygame.Rect(full_rect[0], full_rect[1], full_rect[2], image_rect_height)
             split_3x1 = split_rect(image_rect, 3, horizontally=True)
 
@@ -497,7 +533,7 @@ class MainWindow:
             layout[ViewItems.TARGET_IMAGE_PANE] = split_3x1[1]
             layout[ViewItems.OUTPUT_IMAGE_PANE] = split_3x1[2]
 
-            if not self.hide_controls:
+            if not self.state.hide_controls:
                 controls_rect = pygame.Rect(full_rect[0], image_rect[1] + image_rect[3], full_rect[2],
                                             full_rect[1] + full_rect[3] - (image_rect[1] + image_rect[3]))
                 bottom_3x1 = split_rect(controls_rect, 3, horizontally=True)
@@ -510,6 +546,7 @@ class MainWindow:
 
     def _update_ui_positions(self, layout):
         controls = {
+            ViewItems.TOP_TOOLBAR: self.top_toolbar,
             ViewItems.SIMULATION_CONTROLS: self.simulation_controls,
             ViewItems.BLUR_CONTROLS: self.blur_controls,
             ViewItems.DEBLUR_CONTROLS: self.deblur_controls
@@ -548,7 +585,7 @@ class MainWindow:
         screen = pygame.display.get_surface()
         for key, rect in layout.items():
             if key in images and rect is not None and rect.width >= 0 and rect.height >= 0:
-                render_in_rect_responsibly(images[key], rect, screen, integer_upscale_only=self.integer_upscale)
+                render_in_rect_responsibly(images[key], rect, screen, integer_upscale_only=self.state.integer_upscale)
 
     def handle_potential_ui_event(self, e):
         if e.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
@@ -613,6 +650,7 @@ class MainWindow:
         self._ui_manager.get_theme().load_theme("assets/theme.json")
 
         dummy = pygame.Rect(0, 0, 200, 200)
+        self.top_toolbar = TopControlPanel(dummy, self._ui_manager, self.state)
         self.simulation_controls = SimulationControlPanel(dummy, self._ui_manager, self.state)
         self.blur_controls = BlurControlPanel(dummy, self._ui_manager, self.state)
         self.deblur_controls = BlurControlPanel(dummy, self._ui_manager, self.state, deblur=True)
@@ -648,16 +686,16 @@ class MainWindow:
                         self.state.autoplay = not self.state.autoplay
                         print(f"INFO: {'un' if self.state.autoplay else ''}paused simulation [toggle with P]")
                     elif e.key == pygame.K_h:
-                        self.hide_controls = not self.hide_controls
-                        print(f"INFO: {'un' if not self.hide_controls else ''}hiding controls [toggle with H]")
+                        self.state.hide_controls = not self.state.hide_controls
+                        print(f"INFO: {'un' if not self.state.hide_controls else ''}hiding controls [toggle with H]")
                     elif e.key == pygame.K_m:
                         all_modes = [m for m in Modes]
-                        mode_idx = all_modes.index(self.view_mode)
-                        self.view_mode = all_modes[(mode_idx + 1) % len(all_modes)]
-                        print(f"INFO: set viewing mode to {self.view_mode} [toggle with M]")
+                        mode_idx = all_modes.index(self.state.view_mode)
+                        self.state.view_mode = all_modes[(mode_idx + 1) % len(all_modes)]
+                        print(f"INFO: set viewing mode to {self.state.view_mode} [toggle with M]")
                     elif e.key == pygame.K_i:
-                        self.integer_upscale = not self.integer_upscale
-                        print(f"INFO: integer upscaling only set to {self.integer_upscale} [toggle with I]")
+                        self.state.integer_upscale = not self.state.integer_upscale
+                        print(f"INFO: integer upscaling only set to {self.state.integer_upscale} [toggle with I]")
                     elif e.key == pygame.K_SPACE:
                         self.state.simulation.step()
                 else:

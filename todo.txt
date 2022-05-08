@@ -1,0 +1,17 @@
+
+top bar:
+    - switch mode
+        - blur and unblur
+        - just deblur
+    - import
+        - new unblurred image
+        - new blurred image
+    - save
+        - blurred image
+        - reconstructed image
+        - error image
+        - full view
+    - info
+image labels
+fps slider
+masks?

@@ -312,8 +312,6 @@ class AbstractIterativeGhastDeblurrer(AbstractIterativeDeblurrer):
         self.combined_error_image = self.img.copy()
         pygame.surfarray.blit_array(self.combined_error_image, combo)
 
-
-
     def _calc_distance_in_both_directions(self, img, target) -> typing.Tuple[pygame.Surface, pygame.Surface]:
         if img is None or target is None:
             return None, None
