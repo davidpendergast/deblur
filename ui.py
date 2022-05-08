@@ -41,6 +41,8 @@ class State:
         self.simulation = UiControlledIterativeGhastDeblurrer(simulation_settings or SimulationSettings(),
                                                               deblur_settings or BlurSettings())
 
+        self.autoplay = True
+
     def set_original_image(self, surf: pygame.Surface, filename: str = None):
         self.original_image_file = filename
         self.original_image = surf
@@ -55,13 +57,13 @@ class State:
         self.simulation.set_target_image(surf)
         self.simulation.reset()
 
-    def get_blur_settings(self):
+    def get_blur_settings(self) -> 'BlurSettings':
         return self.blur_settings
 
-    def get_deblur_settings(self):
+    def get_deblur_settings(self) -> 'BlurSettings':
         return self.simulation.deblur_settings
 
-    def get_simulation_settings(self):
+    def get_simulation_settings(self) -> 'SimulationSettings':
         return self.simulation.settings
 
     def regenerate_target_image(self):
@@ -143,48 +145,16 @@ class Modes(enum.Enum):
     BLUR_AND_DEBLUR = "blur_deblur"
 
 
-class BlurController:
+class ControlPanel:
 
-    def __init__(self, rect, manager, settings: BlurSettings, deblur=False):
-        self.settings = settings
+    def __init__(self, rect, manager):
+        self.panel = self.build_panel(rect, manager)
+        self.item_layouts = []
 
-        self.panel = pygame_gui.elements.UIPanel(rect, starting_layer_height=2, manager=manager)
+    def build_panel(self, rect, manager):
+        return pygame_gui.elements.UIPanel(rect, starting_layer_height=2, manager=manager)
 
-        Deb = "Deb" if deblur else "B"  # the *only* valid reason to have an uppercase var name
-        de = "de" if deblur else ""
-
-        self.title_label = pygame_gui.elements.UILabel(
-            pygame.Rect(0, 0, rect.width, 24), f"{Deb}lur Settings",
-            manager=manager, container=self.panel,
-        )
-
-        self.blur_type_selector = pygame_gui.elements.UIDropDownMenu(
-            list(map(title_case, blurs.get_all_blurs())),
-            title_case(self.settings.blur_type),
-            pygame.Rect(0, 24, rect.width, 24),
-            manager, container=self.panel,
-            object_id=f"#{de}blur_blur_type"
-        )
-
-        self.radius_slider = pygame_gui.elements.UIHorizontalSlider(
-            pygame.Rect(0, 69, rect.width, 24), self.settings.radius, (0.0, self.settings.max_radius), manager,
-            container=self.panel, click_increment=1, object_id=f"#{de}blur_radius")
-
-        self.radius_label = pygame_gui.elements.UILabel(
-            pygame.Rect(0, 48, rect.width, 24), f"Radius: {self.settings.radius} px",
-            manager=manager, container=self.panel,
-        )
-
-        self._item_layouts = [
-            (self.title_label, 24),
-            (None, 4),
-            ([(self.blur_type_selector, 0.5), (self.radius_label, 0.5)], 24),
-            (self.radius_slider, 24),
-            (None, 48)
-        ]
-        self.set_rect(rect)
-
-    def set_rect(self, rect):
+    def update(self, rect: pygame.Rect):
         if rect is None or rect.width <= 0 or rect.height <= 0:
             self.panel.hide()
         else:
@@ -192,8 +162,11 @@ class BlurController:
             self.panel.set_relative_position(rect.topleft)
             self.panel.set_dimensions(rect.size)
 
+            rect = rect.copy()
+            rect.width = max(0, rect.width - 4)
+
             y = 0
-            for (item, height) in self._item_layouts:
+            for (item, height) in self.item_layouts:
                 if isinstance(item, list):
                     exact_space = 0
                     total_weight = 0
@@ -215,26 +188,198 @@ class BlurController:
                 y += height
 
     def get_minimum_height(self):
-        return sum(map(lambda x: x[1], self._item_layouts))
+        return sum(map(lambda x: x[1], self.item_layouts))
+
+
+class BlurControlPanel(ControlPanel):
+
+    def __init__(self, rect, manager, state, deblur=False):
+        super().__init__(rect, manager)
+        self.is_deblur = deblur
+        self.state = state
+        self.settings = state.get_blur_settings() if not self.is_deblur else state.get_deblur_settings()
+
+        Deb = "Deb" if self.is_deblur else "B"  # the *only* valid reason to have an uppercase var name
+        de = "de" if self.is_deblur else ""
+
+        self.title_label = pygame_gui.elements.UILabel(
+            pygame.Rect(0, 0, rect.width, 24), f"{Deb}lur Settings",
+            manager=manager, container=self.panel,
+        )
+
+        self.blur_type_selector = pygame_gui.elements.UIDropDownMenu(
+            list(map(title_case, blurs.get_all_blurs())),
+            title_case(self.settings.blur_type),
+            pygame.Rect(0, 24, rect.width, 24),
+            manager, container=self.panel,
+            object_id=f"#{de}blur_blur_type"
+        )
+
+        self.radius_slider = pygame_gui.elements.UIHorizontalSlider(
+            pygame.Rect(0, 69, rect.width, 24), self.settings.radius, (0.0, self.settings.max_radius), manager,
+            container=self.panel, click_increment=1, object_id=f"#{de}blur_radius"
+        )
+
+        self.radius_label = pygame_gui.elements.UILabel(
+            pygame.Rect(0, 48, rect.width, 24), f"Radius: {self.settings.radius}",
+            manager=manager, container=self.panel,
+        )
+
+        if self.is_deblur:
+            self.correction_intensity_label = pygame_gui.elements.UILabel(
+                rect, f"Correction: -1 -> -1",
+                manager=manager, container=self.panel,
+            )
+
+            self.correction_intensity_lower_slider = pygame_gui.elements.UIHorizontalSlider(
+                rect, int(self.state.get_simulation_settings().start_intensity * 10), (0, 100), manager,
+                container=self.panel, click_increment=1, object_id=f"#lower_intensity_slider"
+            )
+
+            self.correction_intensity_upper_slider = pygame_gui.elements.UIHorizontalSlider(
+                rect, int(self.state.get_simulation_settings().end_intensity * 10), (0, 100), manager,
+                container=self.panel, click_increment=1, object_id=f"#upper_intensity_slider"
+            )
+
+        self.item_layouts = [
+            (self.title_label, 24),
+            (None, 4),
+            ([(self.blur_type_selector, 0.5), (self.radius_label, 0.5)], 24),
+            (self.radius_slider, 24),
+        ]
+
+        if self.is_deblur:
+            self.item_layouts.extend([
+                (None, 4),
+                (self.correction_intensity_label, 24),
+                ([(self.correction_intensity_lower_slider, 0.5), (self.correction_intensity_upper_slider, 0.5)], 24),
+            ])
+        self.item_layouts.append((None, 4))
+
+        self.update(rect)
 
     def update(self, rect):
-        self.radius_label.set_text(f"Radius: {self.settings.radius} px")
-        self.set_rect(rect)
+        self.radius_label.set_text(f"Radius: {self.settings.radius}")
+
+        if self.is_deblur:
+            simul_settings = self.state.get_simulation_settings()  # TODO this should probably be in blur settings
+            self.correction_intensity_label.set_text(
+                f"Correction Intensity: {simul_settings.start_intensity:.1f} -> {simul_settings.end_intensity:.1f}")
+
+        super().update(rect)
 
 
-class SimulationController:
+def set_enabled(comp_list, val):
+    if not isinstance(comp_list, list):
+        comp_list = [comp_list]
+    for comp in comp_list:
+        if val:
+            comp.enable()
+        else:
+            comp.disable()
 
-    def __init__(self, rect, manager, settings):
-        self.settings = settings
 
-    def get_minimum_height(self):
-        return 0
+class SimulationControlPanel(ControlPanel):
 
-    def set_rect(self):
-        pass
+    def __init__(self, rect, manager, state):
+        super().__init__(rect, manager)
+        self.state = state
+
+        self.title_label = pygame_gui.elements.UILabel(
+            pygame.Rect(0, 0, rect.width, 24), f"Simulation",
+            manager=manager, container=self.panel,
+        )
+
+        self.stop_button = pygame_gui.elements.UIButton(
+            rect, "⏹", manager, container=self.panel,
+            tool_tip_text="Reset and pause the simulation.",
+            object_id=pygame_gui.core.ObjectID(
+                class_id="@emoji_label",
+                object_id="#simulation_stop"
+            )
+        )
+
+        self.restart_button = pygame_gui.elements.UIButton(
+            rect, "🔄", manager, container=self.panel,
+            tool_tip_text="Restart the simulation.",
+            object_id=pygame_gui.core.ObjectID(
+                class_id="@emoji_label",
+                object_id="#simulation_restart"
+            )
+        )
+
+        self.reset_button = pygame_gui.elements.UIButton(
+            rect, "⏮", manager, container=self.panel,
+            tool_tip_text="Reset iterations to 0 (but leave image unchanged).",
+            object_id=pygame_gui.core.ObjectID(
+                class_id="@emoji_label",
+                object_id="#simulation_reset"
+            )
+        )
+
+        self.play_pause_button = pygame_gui.elements.UIButton(
+            rect, "▶", manager, container=self.panel,
+            tool_tip_text="Play or pause.",
+            object_id=pygame_gui.core.ObjectID(
+                class_id="@emoji_label",
+                object_id="#simulation_play_pause"
+            )
+        )
+
+        self.step_button = pygame_gui.elements.UIButton(
+            rect, "⏩", manager, container=self.panel,
+            tool_tip_text="Perform a single iteration.",
+            object_id=pygame_gui.core.ObjectID(
+                class_id="@emoji_label",
+                object_id="#simulation_step"
+            )
+        )
+
+        self.error_label = pygame_gui.elements.UILabel(
+            rect, f"Error: {0.0}",
+            manager=manager, container=self.panel,
+        )
+
+        self.iterations_label = pygame_gui.elements.UILabel(
+            rect, f"Iteration: -1",
+            manager=manager, container=self.panel
+        )
+
+        self.max_iterations_label = pygame_gui.elements.UILabel(
+            rect, "Max Iterations: ", manager, container=self.panel
+        )
+
+        self.max_iterations_slider = pygame_gui.elements.UIHorizontalSlider(
+            rect, self.state.get_simulation_settings().iteration_limit, (0, 250), manager,
+            container=self.panel, click_increment=1, object_id=f"#simulation_iteration_limit"
+        )
+
+        self.item_layouts = [
+            (self.title_label, 24),
+            (None, 4),
+            ([(self.iterations_label, 0.5), (self.error_label, 0.5)], 24),
+            ([
+                (self.stop_button, 1.0),
+                (self.restart_button, 1.0),
+                (self.reset_button, 1.0),
+                (self.play_pause_button, 1.0),
+                (self.step_button, 1.0)
+            ], 24),
+            ([(self.max_iterations_label, 24 * 6), (self.max_iterations_slider, 1.0)], 24),
+            (None, 48)
+        ]
+
+        self.update(rect)
 
     def update(self, rect):
-        pass
+        simul: deblur.AbstractIterativeGhastDeblurrer = self.state.simulation
+
+        self.iterations_label.set_text(f"Iteration: {simul.get_iteration()}/{simul.get_iteration_limit()}")
+        self.error_label.set_text(f"Error: {simul.get_error():.2f}")
+
+        self.play_pause_button.set_text("⏸" if self.state.autoplay else "▶")
+
+        super().update(rect)
 
 
 class ViewItems(enum.Enum):
@@ -252,12 +397,11 @@ class ViewItems(enum.Enum):
 
 class MainWindow:
 
-    def __init__(self, size=(640, 480)):
+    def __init__(self, size=(960, 480)):
         self.state: State = State()
 
         # viewing options
         self.view_mode = Modes.DEBLUR
-        self.autoplay = True
         self.hide_controls = False
         self.integer_upscale = False
 
@@ -337,7 +481,7 @@ class MainWindow:
         self._ui_manager.update(dt)
 
         simul = self.state.simulation
-        if self.autoplay and simul.get_iteration() < simul.get_iteration_limit():
+        if self.state.autoplay and not simul.is_finished_iterating():
             simul.step()
 
         caption = f"DEBLUR [iter={simul.get_iteration()}, error={simul.get_error():.2f}, fps={self._clock.get_fps():.1f}]"
@@ -380,6 +524,31 @@ class MainWindow:
                 if int(e.value) != self.state.get_blur_settings().radius:
                     self.state.get_blur_settings().radius = int(e.value)
                     self.state.regenerate_target_image()
+            elif "#lower_intensity_slider" in e.ui_object_id:
+                if int(e.value) / 10.0 != self.state.get_simulation_settings().start_intensity:
+                    self.state.get_simulation_settings().start_intensity = int(e.value) / 10.0
+                    self.state.simulation.reset(iter_count=True, img=False)
+            elif "#upper_intensity_slider" in e.ui_object_id:
+                if int(e.value) / 10.0 != self.state.get_simulation_settings().end_intensity:
+                    self.state.get_simulation_settings().end_intensity = int(e.value) / 10.0
+                    self.state.simulation.reset(iter_count=True, img=False)
+            elif "#simulation_iteration_limit" in e.ui_object_id:
+                if int(e.value) != self.state.get_simulation_settings().iteration_limit:
+                    self.state.get_simulation_settings().iteration_limit = int(e.value)
+        elif e.type == pygame_gui.UI_BUTTON_PRESSED:
+            if "#simulation_play_pause" in e.ui_object_id:
+                self.state.autoplay = not self.state.autoplay
+            elif "#simulation_reset" in e.ui_object_id:
+                self.state.simulation.reset(iter_count=True, img=False)
+            elif "#simulation_restart" in e.ui_object_id:
+                self.state.simulation.reset(iter_count=True, img=True)
+                self.state.autoplay = True
+            elif "#simulation_stop" in e.ui_object_id:
+                self.state.simulation.reset(iter_count=True, img=True)
+                self.state.autoplay = False
+            elif "#simulation_step" in e.ui_object_id:
+                if not self.state.autoplay or self.state.simulation.is_finished_iterating():
+                    self.state.simulation.step()
 
     def run(self):
         pygame.init()
@@ -387,12 +556,18 @@ class MainWindow:
         pygame.display.set_mode(self._base_size, pygame.RESIZABLE)
 
         self._clock = pygame.time.Clock()
+
         self._ui_manager = pygame_gui.UIManager(self._base_size)
 
+        self._ui_manager.add_font_paths("emoji", "assets/fonts/NotoEmoji-Regular.ttf")
+        self._ui_manager.preload_fonts([{'name': 'emoji', 'point_size': 14, 'style': 'regular'}])
+
+        self._ui_manager.get_theme().load_theme("assets/theme.json")
+
         dummy = pygame.Rect(0, 0, 200, 200)
-        self.simulation_controls = SimulationController(dummy, self._ui_manager, self.state.get_simulation_settings())
-        self.blur_controls = BlurController(dummy, self._ui_manager, self.state.get_blur_settings())
-        self.deblur_controls = BlurController(dummy, self._ui_manager, self.state.get_deblur_settings(), deblur=True)
+        self.simulation_controls = SimulationControlPanel(dummy, self._ui_manager, self.state)
+        self.blur_controls = BlurControlPanel(dummy, self._ui_manager, self.state)
+        self.deblur_controls = BlurControlPanel(dummy, self._ui_manager, self.state, deblur=True)
 
         running = True
         while running:
@@ -422,8 +597,8 @@ class MainWindow:
                                                                       self.state.get_deblur_settings().radius + 1)
                         self.state.simulation.reset(iter_count=True, img=False)
                     elif e.key == pygame.K_p:
-                        self.autoplay = not self.autoplay
-                        print(f"INFO: {'un' if self.autoplay else ''}paused simulation [toggle with P]")
+                        self.state.autoplay = not self.state.autoplay
+                        print(f"INFO: {'un' if self.state.autoplay else ''}paused simulation [toggle with P]")
                     elif e.key == pygame.K_h:
                         self.hide_controls = not self.hide_controls
                         print(f"INFO: {'un' if not self.hide_controls else ''}hiding controls [toggle with H]")

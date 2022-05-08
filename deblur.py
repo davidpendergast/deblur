@@ -173,6 +173,9 @@ class AbstractIterativeDeblurrer:
     def get_iteration(self) -> int:
         raise NotImplementedError()
 
+    def is_finished_iterating(self):
+        return self.get_iteration() >= self.get_iteration_limit() > 0
+
     def step(self):
         raise NotImplementedError()
 
