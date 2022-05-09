@@ -12,6 +12,7 @@ top bar:
         - error image
         - full view
     - info
+        - pop window?
 image labels
 fps slider
 masks?

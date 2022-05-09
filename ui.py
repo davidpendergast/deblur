@@ -45,7 +45,7 @@ class State:
                                                               deblur_settings or BlurSettings())
 
         # display settings
-        self.view_mode = Modes.DEBLUR
+        self.view_mode = Modes.BLUR_AND_DEBLUR
         self.hide_controls = False
         self.integer_upscale = False
         self.autoplay = True
@@ -144,13 +144,21 @@ def render_in_rect_responsibly(img: pygame.Surface, rect: pygame.Rect, dest: pyg
 
 
 def title_case(text):
-    return " ".join(map(lambda w: w[0:1].upper() + w[1:] if len(w) >= 2 else w.upper(), text.split(" ")))
+    return " ".join(map(lambda w: w[0:1].upper() + w[1:].lower() if len(w) >= 2 else w.upper(), text.split(" ")))
 
 
 class Modes(enum.Enum):
 
-    DEBLUR = "deblur"
-    BLUR_AND_DEBLUR = "blur_deblur"
+    DEBLUR = "deblur mode"
+    BLUR_AND_DEBLUR = "blur & deblur mode"
+
+    @staticmethod
+    def get_mode(value):
+        for m in Modes:
+            if m.value.lower() == value.lower():
+                return m
+        else:
+            raise ValueError(f"unrecognized view mode: {value}")
 
 
 LINE_HEIGHT = 24
@@ -162,50 +170,104 @@ class ControlPanel:
 
     def __init__(self, rect, manager):
         self.panel = self.build_panel(rect, manager)
+        self.ui_manager = manager
         self.item_layouts = []
+
+        self._hidden = None
 
         self.insets = (5, 0, 10, 0)
 
     def build_panel(self, rect, manager):
         return pygame_gui.elements.UIPanel(rect, starting_layer_height=2, manager=manager)
 
+    def all_top_level_components(self):
+        if self.panel is not None:
+            yield self.panel
+        else:
+            for value in self.__dict__.values():
+                if isinstance(value, pygame_gui.core.UIElement):
+                    yield value
+
     def update(self, rect: pygame.Rect):
         if rect is None or rect.width <= self.insets[0] * 2 or rect.height <= self.insets[1] * 2:
-            self.panel.hide()
-        else:
-            self.panel.show()
+            if self._hidden in (None, False):
+                for element in self.all_top_level_components():
+                    element.hide()
+                self._hidden = True
+            return
+
+        if self._hidden in (None, True):
+            if self.panel is not None:
+                self.panel.show()
+                self._hidden = False
+            else:
+                for element in self.all_top_level_components():
+                    element.show()
+            self._hidden = False
+
+        if self.panel is not None:
             self.panel.set_relative_position(rect.topleft)
             self.panel.set_dimensions(rect.size)
 
-            rect = pygame.Rect(rect.x + self.insets[0],
-                               rect.y + self.insets[1],
-                               rect.width - (self.insets[0] + self.insets[2]),
-                               rect.height - (self.insets[1] + self.insets[3]))
+        rect = pygame.Rect(rect.x + self.insets[0],
+                           rect.y + self.insets[1],
+                           rect.width - (self.insets[0] + self.insets[2]),
+                           rect.height - (self.insets[1] + self.insets[3]))
 
-            y = self.insets[1]
-            for (item, height) in self.item_layouts:
-                if isinstance(item, list):
-                    exact_space = 0
-                    total_weight = 0
-                    for (subitem, weight) in item:
-                        if isinstance(weight, int):
-                            exact_space += weight
-                        elif isinstance(weight, float):
-                            total_weight += weight
-                    x = self.insets[0]
-                    flex_space = max(0, rect.width - exact_space)
-                    for (subitem, weight) in item:
-                        subitem_width = weight if isinstance(weight, int) else round(flex_space * weight / total_weight)
+        x0 = 0 if self.panel is not None else rect.x
+        y0 = 0 if self.panel is not None else rect.y
+
+        y = y0 + self.insets[1]
+        for (item, height) in self.item_layouts:
+            if isinstance(item, list):
+                exact_space = 0
+                total_weight = 0
+                for (subitem, weight) in item:
+                    if isinstance(weight, int):
+                        exact_space += weight
+                    elif isinstance(weight, float):
+                        total_weight += weight
+                x = x0 + self.insets[0]
+                flex_space = max(0, rect.width - exact_space)
+                for (subitem, weight) in item:
+                    subitem_width = weight if isinstance(weight, int) else round(flex_space * weight / total_weight)
+                    if callable(subitem):
+                        subitem = subitem()
+                    if subitem is not None:
                         subitem.set_relative_position((x, y))
                         subitem.set_dimensions((subitem_width, height))
-                        x += subitem_width
-                elif item is not None:
+                    x += subitem_width
+            else:
+                if callable(item):
+                    item = item()
+                if item is not None:
                     item.set_relative_position((self.insets[0], y))
                     item.set_dimensions((rect.width, height))
-                y += height
+            y += height
 
     def get_minimum_height(self):
         return sum(map(lambda x: x[1], self.item_layouts))
+
+    def set_selector_value(self, object_id, value, new_options=None):
+        # XXX we're hacking around the fact that there's no UIDropDownMenu.set_current_selection()
+        # (at least as far as I could tell...)
+        for attrib_name, attrib_value in self.__dict__.items():
+            if isinstance(attrib_value, pygame_gui.elements.UIDropDownMenu):
+                selector: pygame_gui.elements.UIDropDownMenu = attrib_value
+                if object_id in selector.object_ids:
+                    if new_options is None:
+                        new_options = list(selector.options_list)
+
+                    selector.kill()
+
+                    new_selector = pygame_gui.elements.UIDropDownMenu(
+                        new_options, value,
+                        pygame.Rect(0, 24, 100, 24),
+                        self.ui_manager, container=self.panel,
+                        object_id=object_id
+                    )
+
+                    setattr(self, attrib_name, new_selector)
 
 
 class BlurControlPanel(ControlPanel):
@@ -284,7 +346,7 @@ class BlurControlPanel(ControlPanel):
         self.item_layouts = [
             (self.title_label, LINE_HEIGHT),
             (None, SMALL_GAP),
-            (self.blur_type_selector, LINE_HEIGHT),
+            (lambda: self.blur_type_selector, LINE_HEIGHT),
             ([(self.radius_label, SHORT_LABEL_WIDTH), (self.radius_slider, 1.0)], LINE_HEIGHT)
         ]
 
@@ -431,30 +493,70 @@ class SimulationControlPanel(ControlPanel):
 
 class TopControlPanel(ControlPanel):
 
+    IMPORT = "Import..."
+    EXPORT = "Export..."
+    NORMAL_IMAGE = "Normal Image"
+    BLURRED_IMAGE = "Blurred Image"
+    DEBLURRED_IMAGE = "Deblurred Image"
+    ERROR_IMAGE = "Error Image"
+
     def __init__(self, rect, manager, state):
         super().__init__(rect, manager)
         self.state = state
-        self.insets = (0, 0, 0, 0)
+        self.insets = (2, 2, 2, 2)
 
-        all_modes = [str(m) for m in Modes]
+        all_modes = [m.value for m in Modes]
         self.view_mode_selector = pygame_gui.elements.UIDropDownMenu(
             list(map(title_case, all_modes)),
-            title_case(str(self.state.view_mode)),
+            title_case(self.state.view_mode.value),
             pygame.Rect(0, 24, rect.width, 24),
             manager, container=self.panel,
-            object_id=f"#view_mode_selector"
+            object_id="#view_mode_selector"
         )
+
+        self.import_button = pygame_gui.elements.UIDropDownMenu(
+            [TopControlPanel.IMPORT, TopControlPanel.NORMAL_IMAGE, TopControlPanel.BLURRED_IMAGE],
+            TopControlPanel.IMPORT,
+            pygame.Rect(0, 24, rect.width, 24),
+            manager, container=self.panel,
+            object_id="#import_selector"
+        )
+
+        self.export_button = pygame_gui.elements.UIDropDownMenu(
+            [TopControlPanel.EXPORT, TopControlPanel.DEBLURRED_IMAGE, TopControlPanel.BLURRED_IMAGE, TopControlPanel.ERROR_IMAGE],
+            TopControlPanel.EXPORT,
+            pygame.Rect(0, 24, rect.width, 24),
+            manager, container=self.panel,
+            object_id="#export_selector"
+        )
+
+        self.fake_panel = super().build_panel(rect, manager)
+        self.fake_panel.change_layer(-1)
 
         self.item_layouts = [
             ([
-                 (self.view_mode_selector, SHORT_LABEL_WIDTH),
-             ], LINE_HEIGHT)
+                 (lambda: self.view_mode_selector, SHORT_LABEL_WIDTH + 24 * 2),
+                 (lambda: self.import_button, SHORT_LABEL_WIDTH + 24),
+                 (None, 1.0),
+                 (lambda: self.export_button, SHORT_LABEL_WIDTH + 24)
+             ], LINE_HEIGHT),
+            (None, int(SMALL_GAP * 2))
         ]
 
         self.update(rect)
 
+    def build_panel(self, rect, manager):
+        return None
+
     def update(self, rect: pygame.Rect):
         super().update(rect)
+
+        if rect is not None and rect.width > 0 and rect.height > 0:
+            self.fake_panel.show()
+            self.fake_panel.set_relative_position(rect.topleft)
+            self.fake_panel.set_dimensions(rect.size)
+        else:
+            self.fake_panel.hide()
 
 
 class ViewItems(enum.Enum):
@@ -497,7 +599,7 @@ class MainWindow:
             top_toolbar_rect = pygame.Rect(0, 0, full_rect.width, self.top_toolbar.get_minimum_height())
             full_rect = pygame.Rect(full_rect.x,
                                     full_rect.y + top_toolbar_rect.y + top_toolbar_rect.height,
-                                    full_rect.width, full_rect.height)
+                                    full_rect.width, full_rect.height - (top_toolbar_rect.y + top_toolbar_rect.height))
             layout[ViewItems.TOP_TOOLBAR] = top_toolbar_rect
 
         if self.state.view_mode == Modes.DEBLUR:
@@ -595,6 +697,18 @@ class MainWindow:
             elif "#blur_blur_type" in e.ui_object_id:
                 self.state.get_blur_settings().blur_type = e.text
                 self.state.regenerate_target_image()
+            elif "#view_mode_selector" in e.ui_object_id:
+                self.state.view_mode = Modes.get_mode(e.text)
+            elif "#import_selector" in e.ui_object_id:
+                if e.text != TopControlPanel.IMPORT:
+                    print(f"INFO: loading {e.text}...")
+                    # TODO self.import_image_from_disk(e.text)
+                    self.top_toolbar.set_selector_value("#import_selector", TopControlPanel.IMPORT)
+            elif "#export_selector" in e.ui_object_id:
+                if e.text != TopControlPanel.EXPORT:
+                    print(f"INFO: exporting {e.text}...")
+                    # TODO self.export_image_to_disk(e.text)
+                    self.top_toolbar.set_selector_value("#export_selector", TopControlPanel.EXPORT)
         elif e.type == pygame_gui.UI_HORIZONTAL_SLIDER_MOVED:
             if "#deblur_radius" in e.ui_object_id:
                 if int(e.value) != self.state.get_deblur_settings().radius:
@@ -693,6 +807,7 @@ class MainWindow:
                         mode_idx = all_modes.index(self.state.view_mode)
                         self.state.view_mode = all_modes[(mode_idx + 1) % len(all_modes)]
                         print(f"INFO: set viewing mode to {self.state.view_mode} [toggle with M]")
+                        self.top_toolbar.set_selector_value("#view_mode_selector", title_case(self.state.view_mode.value))
                     elif e.key == pygame.K_i:
                         self.state.integer_upscale = not self.state.integer_upscale
                         print(f"INFO: integer upscaling only set to {self.state.integer_upscale} [toggle with I]")
