@@ -1,4 +1,6 @@
 import enum
+import os
+import traceback
 
 import pygame
 import pygame_gui
@@ -33,7 +35,7 @@ class UiControlledIterativeGhastDeblurrer(deblur.AbstractIterativeGhastDeblurrer
 
 class State:
 
-    def __init__(self, blur_settings=None, deblur_settings=None, simulation_settings=None):
+    def __init__(self, blur_settings=None, deblur_settings=None, simulation_settings=None, original_presets=None, blurred_presets=None):
         self.original_image_file = None
         self.original_image = None
 
@@ -44,25 +46,35 @@ class State:
         self.simulation = UiControlledIterativeGhastDeblurrer(simulation_settings or SimulationSettings(),
                                                               deblur_settings or BlurSettings())
 
+        self.original_presets = dict(original_presets) if original_presets else {}
+        self.blurred_presets = dict(blurred_presets) if blurred_presets else {}
+
         # display settings
         self.view_mode = Modes.BLUR_AND_DEBLUR
         self.hide_controls = False
         self.integer_upscale = False
         self.autoplay = True
 
-    def set_original_image(self, surf: pygame.Surface, filename: str = None):
+    def set_original_image(self, surf: typing.Optional[pygame.Surface], filename: str = None):
         self.original_image_file = filename
         self.original_image = surf
 
-        if self.original_image is not None and self.target_image_file is None:
-            self.set_target_image(self.get_blur_settings().do_blur(self.original_image))
+        self.regenerate_target_image()
 
-    def set_target_image(self, surf: pygame.Surface, filename: str = None):
+    def set_target_image(self, surf: typing.Optional[pygame.Surface], filename: str = None):
         self.target_image_file = filename
         self.target_image = surf
 
-        self.simulation.set_target_image(surf)
+        self.simulation.set_target_image(self.target_image)
         self.simulation.reset()
+
+    def regenerate_target_image(self):
+        if self.target_image_file is not None:
+            pass  # we're not using a generated target image, no-op
+        elif self.original_image is not None:
+            self.set_target_image(self.get_blur_settings().do_blur(self.original_image))
+        else:
+            self.set_target_image(None)
 
     def get_blur_settings(self) -> 'BlurSettings':
         return self.blur_settings
@@ -72,14 +84,6 @@ class State:
 
     def get_simulation_settings(self) -> 'SimulationSettings':
         return self.simulation.settings
-
-    def regenerate_target_image(self):
-        if self.target_image_file is not None:
-            pass  # we're not using a generated target image, no-op
-        elif self.original_image is not None:
-            self.set_target_image(self.get_blur_settings().do_blur(self.original_image))
-        else:
-            self.set_target_image(None)
 
 
 class BlurSettings:
@@ -149,8 +153,8 @@ def title_case(text):
 
 class Modes(enum.Enum):
 
-    DEBLUR = "deblur mode"
-    BLUR_AND_DEBLUR = "blur & deblur mode"
+    BLUR_AND_DEBLUR = "blur & deblur"
+    DEBLUR = "deblur"
 
     @staticmethod
     def get_mode(value):
@@ -493,11 +497,13 @@ class SimulationControlPanel(ControlPanel):
 
 class TopControlPanel(ControlPanel):
 
+    NONE = "(None)"
+    USE_ORIG = "(Apply Blur)"
     IMPORT = "Import..."
     EXPORT = "Export..."
     NORMAL_IMAGE = "Normal Image"
     BLURRED_IMAGE = "Blurred Image"
-    DEBLURRED_IMAGE = "Deblurred Image"
+    DEBLURRED_IMAGE = "Deblurred Img."
     ERROR_IMAGE = "Error Image"
 
     def __init__(self, rect, manager, state):
@@ -514,13 +520,35 @@ class TopControlPanel(ControlPanel):
             object_id="#view_mode_selector"
         )
 
-        self.import_button = pygame_gui.elements.UIDropDownMenu(
-            [TopControlPanel.IMPORT, TopControlPanel.NORMAL_IMAGE, TopControlPanel.BLURRED_IMAGE],
+        self.original_label = pygame_gui.elements.UILabel(
+            pygame.Rect(0, 24, rect.width, 24),
+            "Original: ", manager, container=self.panel,
+            object_id=pygame_gui.core.ObjectID(class_id="@left_aligned", object_id="label")
+        )
+
+        self.original_image_selector = pygame_gui.elements.UIDropDownMenu(
+            ["test"],
             TopControlPanel.IMPORT,
             pygame.Rect(0, 24, rect.width, 24),
             manager, container=self.panel,
-            object_id="#import_selector"
+            object_id="#original_image_selector"
         )
+
+        self.blurred_label = pygame_gui.elements.UILabel(
+            pygame.Rect(0, 24, rect.width, 24),
+            "Blurred: ", manager, container=self.panel,
+            object_id=pygame_gui.core.ObjectID(class_id="@left_aligned", object_id="label")
+        )
+
+        self.blurred_image_selector = pygame_gui.elements.UIDropDownMenu(
+            ["dummy"],
+            TopControlPanel.IMPORT,
+            pygame.Rect(0, 24, rect.width, 24),
+            manager, container=self.panel,
+            object_id="#blurred_image_selector"
+        )
+
+        self.update_preset_selectors(self.state.original_image_file, self.state.target_image_file)
 
         self.export_button = pygame_gui.elements.UIDropDownMenu(
             [TopControlPanel.EXPORT, TopControlPanel.DEBLURRED_IMAGE, TopControlPanel.BLURRED_IMAGE, TopControlPanel.ERROR_IMAGE],
@@ -535,15 +563,55 @@ class TopControlPanel(ControlPanel):
 
         self.item_layouts = [
             ([
-                 (lambda: self.view_mode_selector, SHORT_LABEL_WIDTH + 24 * 2),
-                 (lambda: self.import_button, SHORT_LABEL_WIDTH + 24),
+                 (lambda: self.view_mode_selector, SHORT_LABEL_WIDTH),
                  (None, 1.0),
-                 (lambda: self.export_button, SHORT_LABEL_WIDTH + 24)
+                 (self.original_label, SHORT_LABEL_WIDTH // 2),
+                 (None, SMALL_GAP),
+                 (lambda: self.original_image_selector, SHORT_LABEL_WIDTH * 3 // 2),
+                 (None, 0.5),
+                 (self.blurred_label, SHORT_LABEL_WIDTH // 2),
+                 (None, SMALL_GAP),
+                 (lambda: self.blurred_image_selector, SHORT_LABEL_WIDTH * 3 // 2),
+                 (None, 1.0),
+                 (lambda: self.export_button, SHORT_LABEL_WIDTH)
              ], LINE_HEIGHT),
             (None, int(SMALL_GAP * 2))
         ]
 
         self.update(rect)
+
+    def update_preset_selectors(self, active_original_item, active_blurred_item):
+        orig_to_select = TopControlPanel.NONE
+        orig_preset_list = [TopControlPanel.NONE]
+        for (path, img) in self.state.original_presets.items():
+            _, tail = os.path.split(path)
+            orig_preset_list.append(tail)
+            if active_original_item == path:
+                orig_to_select = tail
+        if orig_to_select == TopControlPanel.NONE and active_original_item is not None:
+            # using a custom image
+            _, tail = os.path.split(active_original_item)
+            orig_preset_list.insert(0, tail)
+            orig_to_select = tail
+        orig_preset_list.append(TopControlPanel.IMPORT)
+
+        self.set_selector_value("#original_image_selector", orig_to_select, new_options=orig_preset_list)
+
+        blurred_to_select = TopControlPanel.USE_ORIG
+        blurred_preset_list = [TopControlPanel.USE_ORIG]
+        for (path, img) in self.state.blurred_presets.items():
+            _, tail = os.path.split(path)
+            blurred_preset_list.append(tail)
+            if active_blurred_item == path:
+                blurred_to_select = tail
+        if blurred_to_select == TopControlPanel.USE_ORIG and active_blurred_item is not None:
+            # using a custom image
+            _, tail = os.path.split(active_blurred_item)
+            blurred_preset_list.insert(0, tail)
+            blurred_to_select = tail
+        blurred_preset_list.append(TopControlPanel.IMPORT)
+
+        self.set_selector_value("#blurred_image_selector", blurred_to_select, new_options=blurred_preset_list)
 
     def build_panel(self, rect, manager):
         return None
@@ -575,8 +643,8 @@ class ViewItems(enum.Enum):
 
 class MainWindow:
 
-    def __init__(self, size=(960, 480)):
-        self.state: State = State()
+    def __init__(self, size=(960, 480), state=None):
+        self.state: State = state or State()
 
         self.top_toolbar = None
         self.blur_controls = None
@@ -699,11 +767,27 @@ class MainWindow:
                 self.state.regenerate_target_image()
             elif "#view_mode_selector" in e.ui_object_id:
                 self.state.view_mode = Modes.get_mode(e.text)
-            elif "#import_selector" in e.ui_object_id:
-                if e.text != TopControlPanel.IMPORT:
-                    print(f"INFO: loading {e.text}...")
-                    # TODO self.import_image_from_disk(e.text)
-                    self.top_toolbar.set_selector_value("#import_selector", TopControlPanel.IMPORT)
+            elif "#original_image_selector" in e.ui_object_id:
+                if e.text == TopControlPanel.IMPORT:
+                    print(f"INFO: importing image from disk...")
+                    self.state.set_original_image(None)
+                    # TODO self.import_image_from_disk(True)
+                elif e.text in self.state.original_presets:
+                    self.state.set_original_image(self.state.original_presets[e.text], e.text)
+                else:
+                    self.state.set_original_image(None)
+                self.top_toolbar.update_preset_selectors(self.state.original_image_file, self.state.target_image_file)
+            elif "#blurred_image_selector" in e.ui_object_id:
+                if e.text == TopControlPanel.IMPORT:
+                    print(f"INFO: importing image from disk...")
+                    self.state.set_target_image(None)
+                    # TODO self.import_image_from_disk(True)
+                elif e.text in self.state.blurred_presets:
+                    self.state.set_target_image(self.state.blurred_presets[e.text], e.text)
+                elif e.text == TopControlPanel.USE_ORIG:
+                    self.state.set_target_image(None)
+                    self.state.regenerate_target_image()
+                self.top_toolbar.update_preset_selectors(self.state.original_image_file, self.state.target_image_file)
             elif "#export_selector" in e.ui_object_id:
                 if e.text != TopControlPanel.EXPORT:
                     print(f"INFO: exporting {e.text}...")
@@ -826,13 +910,31 @@ class MainWindow:
             pygame.display.flip()
 
 
+def load_presets(path):
+    res = {}
+    for f in os.listdir(path):
+        fullpath = os.path.join(path, f)
+        if os.path.isfile(fullpath):
+            if fullpath.endswith(".jpg") or fullpath.endswith(".png"):
+                try:
+                    img = pygame.image.load(fullpath)
+                    res[f] = img
+                except ValueError:
+                    print(f"ERROR: failed to load preset image: {fullpath}")
+                    traceback.print_exc()
+    return res
+
+
 if __name__ == "__main__":
-    win = MainWindow()
-    # win.state.set_original_image(pygame.image.load("data/3x3_circle_in_10x10_orig.png"))
-    # win.state.set_target_image(pygame.image.load("data/3x3_circle_in_10x10.png"))
-    # win.state.set_original_image(pygame.image.load("data/splash.png"), "data/splash.png")
-    win.state.set_original_image(pygame.image.load("data/parrot.jpg"), "data/parrot.jpg")
-    # win.state.set_target_image(pygame.image.load("data/splash_blurred_15.png"))
+    blurred_presets = load_presets("presets/blurred")
+    normal_presets = load_presets("presets/normal")
+
+    state = State(original_presets=normal_presets, blurred_presets=blurred_presets)
+    win = MainWindow(state=state)
+
+    # i do like the parrot
+    if "parrot.jpg" in normal_presets:
+        win.state.set_original_image(normal_presets["parrot.jpg"], "parrot.jpg")
 
     win.state.simulation.deblur_settings.blur_type = "gaussian"
     win.state.simulation.deblur_settings.radius = 15
