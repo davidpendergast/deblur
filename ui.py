@@ -35,6 +35,8 @@ class UiControlledIterativeGhastDeblurrer(deblur.AbstractIterativeGhastDeblurrer
 
 class UIFileDialogFixed(pygame_gui.windows.UIFileDialog):
 
+    # Note: don't give this a custom object_id or it'll mess up the styling
+
     def _validate_file_or_dir_path(self, path_to_validate) -> bool:
         # XXX default impl doesn't enable OK button when you type a custom path & allow_existing_files_only is False
         if not self.allow_existing_files_only:
@@ -67,11 +69,12 @@ class UIFileDialogFixed(pygame_gui.windows.UIFileDialog):
             self.file_path_text_line.focus()
 
 
-class FileDialogState:
+class FileDialogManager:
 
     def __init__(self, manager, starting_path=".", size=(640, 400)):
         self._ui_manager = manager
         self.file_dialog = None
+        self.object_id = ""
 
         self.next_starting_path = starting_path
         self.starting_size = size
@@ -90,6 +93,7 @@ class FileDialogState:
         if self.file_dialog is not None:
             self.file_dialog.kill()
             self.file_dialog = None
+            self.object_id = ""
 
     def prompt_for_image_to_load(self, object_id, window_title="Import..."):
         self.destroy_dialog()
@@ -100,8 +104,9 @@ class FileDialogState:
             initial_file_path=self.next_starting_path,
             allow_picking_directories=False,
             allow_existing_files_only=True,
-            object_id=object_id
+            # object_id = object_id
         )
+        self.object_id = object_id  # XXX if we pass this to the actual dialog it screws up the display...
 
     def prompt_for_export_dest(self, object_id, window_title="Export..."):
         self.destroy_dialog()
@@ -109,10 +114,12 @@ class FileDialogState:
             self.get_initial_rect(),
             self._ui_manager,
             window_title=window_title,
-            initial_file_path='data/',
+            initial_file_path=self.next_starting_path,
             allow_picking_directories=False,
             allow_existing_files_only=False,
-            object_id=object_id)
+            # object_id=object_id
+        )
+        self.object_id = object_id  # XXX if we pass this to the actual dialog it screws up the display...
 
 
 class State:
@@ -736,7 +743,7 @@ class MainWindow:
         self.blur_controls = None
         self.simulation_controls = None
         self.deblur_controls = None
-        self.file_dialog_state = None
+        self.file_dialog_manager = None
 
         self._base_size = size
         self._fps = 60
@@ -857,8 +864,8 @@ class MainWindow:
             elif "#original_image_selector" in e.ui_object_id:
                 if e.text == TopControlPanel.IMPORT:
                     print(f"INFO: importing image from disk...")
-                    self.state.set_original_image(None)
-                    # TODO self.import_image_from_disk(True)
+                    self.file_dialog_manager.prompt_for_image_to_load(f"#import_file_dialog_original_image",
+                                                                      window_title=f"Import Original Image")
                 elif e.text in self.state.original_presets:
                     self.state.set_original_image(self.state.original_presets[e.text], e.text)
                 else:
@@ -867,8 +874,8 @@ class MainWindow:
             elif "#blurred_image_selector" in e.ui_object_id:
                 if e.text == TopControlPanel.IMPORT:
                     print(f"INFO: importing image from disk...")
-                    self.state.set_target_image(None)
-                    # TODO self.import_image_from_disk(True)
+                    self.file_dialog_manager.prompt_for_image_to_load(f"#import_file_dialog_blurred_image",
+                                                                      window_title=f"Import Blurred Image")
                 elif e.text in self.state.blurred_presets:
                     self.state.set_target_image(self.state.blurred_presets[e.text], e.text)
                 elif e.text == TopControlPanel.USE_ORIG:
@@ -878,8 +885,9 @@ class MainWindow:
             elif "#export_selector" in e.ui_object_id:
                 if e.text != TopControlPanel.EXPORT:
                     print(f"INFO: exporting {e.text}...")
-                    self.file_dialog_state.prompt_for_export_dest(f"#export_file_dialog_{clean_for_obj_id(e.text)}")
                     self.top_toolbar.set_selector_value("#export_selector", TopControlPanel.EXPORT)
+                    self.file_dialog_manager.prompt_for_export_dest(f"#export_file_dialog_{clean_for_obj_id(e.text)}",
+                                                                    window_title=f"Export {e.text}")
         elif e.type == pygame_gui.UI_HORIZONTAL_SLIDER_MOVED:
             if "#deblur_radius" in e.ui_object_id:
                 if int(e.value) != self.state.get_deblur_settings().radius:
@@ -919,6 +927,11 @@ class MainWindow:
             elif "#simulation_step" in e.ui_object_id:
                 if not self.state.autoplay or self.state.simulation.is_finished_iterating():
                     self.state.simulation.step()
+        elif e.type == pygame_gui.UI_FILE_DIALOG_PATH_PICKED:
+            print(f"INFO: path picked: {e.text}")
+        elif e.type == pygame_gui.UI_WINDOW_CLOSE:
+            print("INFO: file dialog closed")
+            self.file_dialog_manager.destroy_dialog()
 
     def run(self):
         pygame.init()
@@ -939,7 +952,7 @@ class MainWindow:
         self.simulation_controls = SimulationControlPanel(dummy, self._ui_manager, self.state)
         self.blur_controls = BlurControlPanel(dummy, self._ui_manager, self.state)
         self.deblur_controls = BlurControlPanel(dummy, self._ui_manager, self.state, deblur=True)
-        self.file_dialog_state = FileDialogState(self._ui_manager, starting_path=".")
+        self.file_dialog_manager = FileDialogManager(self._ui_manager, starting_path="data/")
 
         running = True
         while running:
