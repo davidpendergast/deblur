@@ -33,6 +33,88 @@ class UiControlledIterativeGhastDeblurrer(deblur.AbstractIterativeGhastDeblurrer
         return self.settings.iteration_limit
 
 
+class UIFileDialogFixed(pygame_gui.windows.UIFileDialog):
+
+    def _validate_file_or_dir_path(self, path_to_validate) -> bool:
+        # XXX default impl doesn't enable OK button when you type a custom path & allow_existing_files_only is False
+        if not self.allow_existing_files_only:
+            return self._validate_file_path(path_to_validate)
+        else:
+            return self._validate_path_exists_and_of_allowed_type(path_to_validate, True)
+
+    def _highlight_file_name_for_editing(self):
+        # XXX default impl crashes when you hit backspace after selecting a file (due to this hightlight I guess?)
+        if self.current_file_path is None or self.allow_existing_files_only:
+            return
+
+        highlight_start = self.file_path_text_line.get_text().find(self.current_file_path.stem)
+        highlight_end = highlight_start + len(self.current_file_path.stem)
+        # self.file_path_text_line.select_range[0] = highlight_start  # XXX problematic for some reason
+        # self.file_path_text_line.select_range[1] = highlight_end
+        self.file_path_text_line.cursor_has_moved_recently = True
+        self.file_path_text_line.edit_position = highlight_end
+
+        text_clip_width = (self.file_path_text_line.rect.width -
+                           (self.file_path_text_line.padding[0] * 2) -
+                           (self.file_path_text_line.shape_corner_radius * 2) -
+                           (self.file_path_text_line.border_width * 2) -
+                           (self.file_path_text_line.shadow_width * 2))
+
+        text_width = self.file_path_text_line.font.get_rect(
+            self.file_path_text_line.get_text()).width
+        self.file_path_text_line.start_text_offset = max(0, text_width - text_clip_width)
+        if not self.file_path_text_line.is_focused:
+            self.file_path_text_line.focus()
+
+
+class FileDialogState:
+
+    def __init__(self, manager, starting_path=".", size=(640, 400)):
+        self._ui_manager = manager
+        self.file_dialog = None
+
+        self.next_starting_path = starting_path
+        self.starting_size = size
+
+    def update_next_starting_path(self, new_path):
+        if new_path is not None:
+            self.next_starting_path = new_path
+
+    def get_initial_rect(self):
+        screen_rect = pygame.display.get_surface().get_rect()
+        res = pygame.Rect(0, 0, *self.starting_size)
+        res.center = screen_rect.center
+        return res
+
+    def destroy_dialog(self):
+        if self.file_dialog is not None:
+            self.file_dialog.kill()
+            self.file_dialog = None
+
+    def prompt_for_image_to_load(self, object_id, window_title="Import..."):
+        self.destroy_dialog()
+        self.file_dialog = UIFileDialogFixed(
+            self.get_initial_rect(),
+            self._ui_manager,
+            window_title=window_title,
+            initial_file_path=self.next_starting_path,
+            allow_picking_directories=False,
+            allow_existing_files_only=True,
+            object_id=object_id
+        )
+
+    def prompt_for_export_dest(self, object_id, window_title="Export..."):
+        self.destroy_dialog()
+        self.file_dialog = UIFileDialogFixed(
+            self.get_initial_rect(),
+            self._ui_manager,
+            window_title=window_title,
+            initial_file_path='data/',
+            allow_picking_directories=False,
+            allow_existing_files_only=False,
+            object_id=object_id)
+
+
 class State:
 
     def __init__(self, blur_settings=None, deblur_settings=None, simulation_settings=None, original_presets=None, blurred_presets=None):
@@ -147,8 +229,12 @@ def render_in_rect_responsibly(img: pygame.Surface, rect: pygame.Rect, dest: pyg
         dest.blit(scaled_img, (x, y))
 
 
-def title_case(text):
+def title_case(text: str) -> str:
     return " ".join(map(lambda w: w[0:1].upper() + w[1:].lower() if len(w) >= 2 else w.upper(), text.split(" ")))
+
+
+def clean_for_obj_id(text: str) -> str:
+    return text.lower().replace(".", "").replace(" ", "_")
 
 
 class Modes(enum.Enum):
@@ -650,6 +736,7 @@ class MainWindow:
         self.blur_controls = None
         self.simulation_controls = None
         self.deblur_controls = None
+        self.file_dialog_state = None
 
         self._base_size = size
         self._fps = 60
@@ -791,7 +878,7 @@ class MainWindow:
             elif "#export_selector" in e.ui_object_id:
                 if e.text != TopControlPanel.EXPORT:
                     print(f"INFO: exporting {e.text}...")
-                    # TODO self.export_image_to_disk(e.text)
+                    self.file_dialog_state.prompt_for_export_dest(f"#export_file_dialog_{clean_for_obj_id(e.text)}")
                     self.top_toolbar.set_selector_value("#export_selector", TopControlPanel.EXPORT)
         elif e.type == pygame_gui.UI_HORIZONTAL_SLIDER_MOVED:
             if "#deblur_radius" in e.ui_object_id:
@@ -852,6 +939,7 @@ class MainWindow:
         self.simulation_controls = SimulationControlPanel(dummy, self._ui_manager, self.state)
         self.blur_controls = BlurControlPanel(dummy, self._ui_manager, self.state)
         self.deblur_controls = BlurControlPanel(dummy, self._ui_manager, self.state, deblur=True)
+        self.file_dialog_state = FileDialogState(self._ui_manager, starting_path=".")
 
         running = True
         while running:
