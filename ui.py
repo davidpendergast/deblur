@@ -1046,7 +1046,7 @@ class MainWindow:
         self._ui_manager.add_font_paths("emoji", "assets/fonts/NotoEmoji-Regular.ttf")
         self._ui_manager.preload_fonts([{'name': 'emoji', 'point_size': 14, 'style': 'regular'}])
 
-        self._ui_manager.get_theme().load_theme("assets/theme.json")
+        self._ui_manager.get_theme().load_theme("assets/themes/theme.json")
 
         dummy = pygame.Rect(0, 0, 200, 200)
         self.top_toolbar = TopControlPanel(dummy, self._ui_manager, self.state)
