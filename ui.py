@@ -93,7 +93,6 @@ class FileDialogManager:
         if self.file_dialog is not None:
             self.file_dialog.kill()
             self.file_dialog = None
-            self.object_id = ""
 
     def prompt_for_image_to_load(self, object_id, window_title="Import..."):
         self.destroy_dialog()
@@ -115,7 +114,7 @@ class FileDialogManager:
             self._ui_manager,
             window_title=window_title,
             initial_file_path=self.next_starting_path,
-            allow_picking_directories=False,
+            allow_picking_directories=True,
             allow_existing_files_only=False,
             # object_id=object_id
         )
@@ -929,6 +928,53 @@ class MainWindow:
                     self.state.simulation.step()
         elif e.type == pygame_gui.UI_FILE_DIALOG_PATH_PICKED:
             print(f"INFO: path picked: {e.text}")
+            if "#export_file_dialog" in self.file_dialog_manager.object_id:
+                img_to_save = None
+                filename = "image"
+                if clean_for_obj_id(TopControlPanel.BLURRED_IMAGE) in self.file_dialog_manager.object_id:
+                    img_to_save = self.state.simulation.get_blurred_output_image()
+                    filename = "blurred"
+                elif clean_for_obj_id(TopControlPanel.ERROR_IMAGE) in self.file_dialog_manager.object_id:
+                    img_to_save = self.state.simulation.get_error_image()
+                    filename = "error"
+                elif clean_for_obj_id(TopControlPanel.DEBLURRED_IMAGE) in self.file_dialog_manager.object_id:
+                    img_to_save = self.state.simulation.get_output_image()
+                    filename = "deblurred"
+
+                if img_to_save is not None:
+                    if os.path.isdir(e.text):
+                        # if they selected a directory, generate a filename
+                        filepath = os.path.join(e.text, filename + ".png")
+                        i = 1
+                        while os.path.isfile(filepath):
+                            filepath = os.path.join(e.text, filename + f"_{i}.png")
+                            i += 1
+                    else:
+                        filepath = e.text
+
+                    try:
+                        pygame.image.save(img_to_save, filepath)
+                        print(f"INFO: saved image to {filepath}")
+                    except pygame.error:
+                        print(f"ERROR: failed to export image to: {filepath}")
+                        traceback.print_exc()
+            elif "#import_file_dialog" in self.file_dialog_manager.object_id:
+                try:
+                    imported_img = pygame.image.load(e.text)
+                    did_load = False
+                    if "blurred_image" in self.file_dialog_manager.object_id:
+                        self.state.set_target_image(imported_img, e.text)
+                        did_load = True
+                    elif "original_image" in self.file_dialog_manager.object_id:
+                        self.state.set_original_image(imported_img, e.text)
+                        did_load = True
+
+                    if did_load:
+                        self.top_toolbar.update_preset_selectors(self.state.original_image_file, self.state.target_image_file)
+                except pygame.error:
+                    print(f"ERROR: failed to import image: {e.text}")
+                    traceback.print_exc()
+                self.file_dialog_manager.object_id = ""
         elif e.type == pygame_gui.UI_WINDOW_CLOSE:
             print("INFO: file dialog closed")
             self.file_dialog_manager.destroy_dialog()
