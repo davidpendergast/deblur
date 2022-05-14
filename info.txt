@@ -1,6 +1,6 @@
 
-Deblur 
-------
+Deblur v1.0.0
+-------------
 
 Made by Ghast
 -------------
@@ -9,3 +9,41 @@ https://twitter.com/Ghast_NEOH
 
 
 This is an experimental tool that blurs and deblurs images.
+
+User Guide
+----------
+
+1. Top Bar
+  Contains the overall mode selector and options for importing/exporting images.
+  a. Mode selector. Select between different viewing modes.
+  b. Original image selector. Choose a preloaded image or import your own to blur.
+  c. Blurred image selector. Choose a preloaded image or select your own to deblur. 
+     Choose "(Apply Blur)" to deblur the current original image.
+  d. Export image selector. Save generated images to disk.
+
+2. Blur Settings
+  Only available in Blur & Deblur Mode. Controls for blurring the original image.
+  a. Blur type selector. Determines the type of blur that's applied.
+  b. Radius slider. Determines the blurring radius. Higher radius = more blurry.
+
+3. Simulation Settings
+  Playback controls for the deblurring algorithm.
+  a. Stop, Restart, Play/Pause, Reset, and Step buttons.
+     These control the iterative deblurring procedure.
+  b. Iteration limit slider. How many iterations it should do before stopping.
+
+4. Deblur Settings
+  Controls for deblurring.
+  a. Blur type selector. What kind of blur to reverse.
+  b. Radius slider. What radius of blur to reverse.
+  c. Advanced options. Honestly, these don't seem to be that useful.
+     They control some of the inner workings of the deblurring algorithm
+     but the default values are pretty much always fine. 
+
+     The power settings control how much "randomness" should be added to guesses 
+     at the first and last iteration, respectively. (Iterations in between use a 
+     linearlly interpolated value). 
+
+     The anti-blur setting affects how the error is calculated. I think there's
+     never a reason to change it off 100% unless you want a glitchy result.
+  

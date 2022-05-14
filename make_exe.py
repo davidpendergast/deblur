@@ -10,7 +10,7 @@ import struct
 NAME_OF_GAME = "Deblur"
 NAME_OF_GAME_SIMPLE = "deblur"
 
-ICON_PATH_ICO = None  # "assets/icons/icon.ico"
+ICON_PATH_ICO = "assets/icons/icon.ico"
 ICON_PATH_ICNS = "assets/icons/icon.icns"  # mac-style icons
 
 SPLASH_IMAGE_PATH = "assets/splash.png"

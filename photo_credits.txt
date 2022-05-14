@@ -1,4 +1,8 @@
 
+I've done my best to ensure I'm allowed to use these photos.
+I'm trusting the sites at their word though, so don't take this
+as a guarantee that these can be used & distributed freely.
+
 
 parrot.jpg
 ----------
@@ -6,13 +10,11 @@ https://www.publicdomainpictures.net/en/view-image.php?image=169519&picture=parr
 by George Hodan
 CC0 Public Domain
 
-
 building.jpg
 ------------
 https://unsplash.com/photos/QdAAasrZhdk
 by Lance Anderson
 CC0 1.0 Universal (CC0 1.0) Public Domain Dedication 
-
 
 fish.jpg
 --------
@@ -32,6 +34,11 @@ https://www.publicdomainpictures.net/en/view-image.php?image=88823&picture=zebra
 by Paul Brennan
 CC0 Public Domain
 
+face.jpg
+--------
+https://www.rgbstock.com/photo/ph9p9MO/Woman%27s+Face+2
+by xymonau
+licensing info here: https://www.rgbstock.com/license
 
-Anything "pixely" is an original work by me.
 
+The pixel art pieces are original works by me.

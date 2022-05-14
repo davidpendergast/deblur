@@ -185,13 +185,13 @@ class State:
 
     def set_original_image(self, surf: typing.Optional[pygame.Surface], filename: str = None):
         self.original_image_file = filename
-        self.original_image = surf
+        self.original_image = surf.convert() if surf is not None else None
 
         self.regenerate_target_image()
 
     def set_target_image(self, surf: typing.Optional[pygame.Surface], filename: str = None):
         self.target_image_file = filename
-        self.target_image = surf
+        self.target_image = surf.convert() if surf is not None else None
 
         self.simulation.set_target_image(self.target_image)
         self.simulation.reset()
@@ -878,7 +878,7 @@ class MainWindow:
         if self.state.autoplay and not simul.is_finished_iterating():
             simul.step()
 
-        caption = f"DEBLUR [iter={simul.get_iteration()}, error={simul.get_error():.2f}, fps={self._clock.get_fps():.1f}]"
+        caption = f"Deblur [iter={simul.get_iteration()}, error={simul.get_error():.2f}, fps={self._clock.get_fps():.1f}]"
         pygame.display.set_caption(caption)
 
     def _render(self, layout):
@@ -1046,16 +1046,23 @@ class MainWindow:
         elif e.type == pygame_gui.UI_WINDOW_CLOSE:
             self.file_dialog_manager.destroy_dialogs(object_ids=[e.ui_object_id])
 
-    def run(self):
+    def init_display(self):
         pygame.init()
-
-        print("test1")
         pygame.display.set_mode(self._base_size, pygame.RESIZABLE)
+
+        try:
+            window_icon = pygame.image.load(resource_path("assets/icons/icon_16x16.png"))
+            pygame.display.set_icon(window_icon)
+        except pygame.error:
+            traceback.print_exc()
+
+    def run(self):
+        if not pygame.get_init() or pygame.display.get_surface() is None:
+            self.init_display()
 
         self._clock = pygame.time.Clock()
 
         self._ui_manager = pygame_gui.UIManager(self._base_size)
-        print("test2")
         self._ui_manager.add_font_paths("emoji", resource_path("assets/fonts/NotoEmoji-Regular.ttf"))
         self._ui_manager.preload_fonts([{'name': 'emoji', 'point_size': 14, 'style': 'regular'}])
 
@@ -1149,6 +1156,7 @@ def launch_app():
 
     state = State(original_presets=normal_presets, blurred_presets=blurred_presets)
     win = MainWindow(state=state)
+    win.init_display()
 
     # i do like the parrot
     if "parrot.jpg" in normal_presets:
