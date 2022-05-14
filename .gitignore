@@ -3,3 +3,7 @@
 __pycache__/*
 test.py
 trash/*
+output.spec
+dest/*
+dist/*
+build/*

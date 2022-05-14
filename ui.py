@@ -1,5 +1,6 @@
 import enum
 import os
+import sys
 import traceback
 
 import pygame
@@ -280,6 +281,17 @@ def title_case(text: str) -> str:
 
 def clean_for_obj_id(text: str) -> str:
     return text.lower().replace(".", "").replace(" ", "_")
+
+
+def resource_path(relative_path):
+    """ Get path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+
+    return os.path.normpath(os.path.join(base_path, relative_path))
 
 
 class Modes(enum.Enum):
@@ -1037,23 +1049,24 @@ class MainWindow:
     def run(self):
         pygame.init()
 
+        print("test1")
         pygame.display.set_mode(self._base_size, pygame.RESIZABLE)
 
         self._clock = pygame.time.Clock()
 
         self._ui_manager = pygame_gui.UIManager(self._base_size)
-
-        self._ui_manager.add_font_paths("emoji", "assets/fonts/NotoEmoji-Regular.ttf")
+        print("test2")
+        self._ui_manager.add_font_paths("emoji", resource_path("assets/fonts/NotoEmoji-Regular.ttf"))
         self._ui_manager.preload_fonts([{'name': 'emoji', 'point_size': 14, 'style': 'regular'}])
 
-        self._ui_manager.get_theme().load_theme("assets/themes/theme.json")
+        self._ui_manager.get_theme().load_theme(resource_path("assets/themes/theme.json"))
 
         dummy = pygame.Rect(0, 0, 200, 200)
         self.top_toolbar = TopControlPanel(dummy, self._ui_manager, self.state)
         self.simulation_controls = SimulationControlPanel(dummy, self._ui_manager, self.state)
         self.blur_controls = BlurControlPanel(dummy, self._ui_manager, self.state)
         self.deblur_controls = BlurControlPanel(dummy, self._ui_manager, self.state, deblur=True)
-        self.file_dialog_manager = FileDialogManager(self._ui_manager, starting_path="data/")
+        self.file_dialog_manager = FileDialogManager(self._ui_manager, starting_path="userdata/")
 
         running = True
         while running:
@@ -1114,20 +1127,23 @@ class MainWindow:
 
 def load_presets(path):
     res = {}
-    for f in os.listdir(path):
-        fullpath = os.path.join(path, f)
-        if os.path.isfile(fullpath):
-            if fullpath.endswith(".jpg") or fullpath.endswith(".png"):
-                try:
-                    img = pygame.image.load(fullpath)
-                    res[f] = img
-                except ValueError:
-                    print(f"ERROR: failed to load preset image: {fullpath}")
-                    traceback.print_exc()
+    try:
+        for f in os.listdir(path):
+            fullpath = os.path.join(path, f)
+            if os.path.isfile(fullpath):
+                if fullpath.endswith(".jpg") or fullpath.endswith(".png"):
+                    try:
+                        img = pygame.image.load(fullpath)
+                        res[f] = img
+                    except:
+                        print(f"ERROR: failed to load preset image: {fullpath}")
+                        traceback.print_exc()
+    except IOError:
+        traceback.print_exc()
     return res
 
 
-if __name__ == "__main__":
+def launch_app():
     blurred_presets = load_presets("presets/blurred")
     normal_presets = load_presets("presets/normal")
 
@@ -1142,4 +1158,8 @@ if __name__ == "__main__":
     win.state.simulation.deblur_settings.radius = 15
 
     win.run()
+
+
+if __name__ == "__main__":
+    launch_app()
 
