@@ -71,7 +71,7 @@ class UIFileDialogFixed(pygame_gui.windows.UIFileDialog):
 
 class FileDialogManager:
 
-    def __init__(self, manager, starting_path=".", size=(640, 400)):
+    def __init__(self, manager, starting_path=".", size=(640, 400), message_size=(540, 160)):
         self._ui_manager = manager
         self.file_dialog = None
         self.object_id = ""
@@ -79,23 +79,38 @@ class FileDialogManager:
         self.next_starting_path = starting_path
         self.starting_size = size
 
+        self.message_dialog = None
+        self.starting_message_size = message_size
+        self.confirm_action = None
+
     def update_next_starting_path(self, new_path):
         if new_path is not None:
             self.next_starting_path = new_path
 
-    def get_initial_rect(self):
+    def get_initial_rect(self, for_file_dialog=True):
         screen_rect = pygame.display.get_surface().get_rect()
-        res = pygame.Rect(0, 0, *self.starting_size)
+        if for_file_dialog:
+            starting_size = self.starting_size
+        else:
+            starting_size = self.starting_message_size
+        res = pygame.Rect(0, 0, *starting_size)
         res.center = screen_rect.center
         return res
 
-    def destroy_dialog(self):
+    def destroy_dialogs(self, object_ids=None):
         if self.file_dialog is not None:
-            self.file_dialog.kill()
-            self.file_dialog = None
+            if object_ids is None or "#file_dialog" in object_ids:
+                self.file_dialog.kill()
+                self.file_dialog = None
+
+        if self.message_dialog is not None:
+            if object_ids is None or \
+                    any(obj_id in object_ids for obj_id in self.message_dialog.object_ids):
+                self.message_dialog.kill()
+                self.message_dialog = None
 
     def prompt_for_image_to_load(self, object_id, window_title="Import..."):
-        self.destroy_dialog()
+        self.destroy_dialogs()
         self.file_dialog = UIFileDialogFixed(
             self.get_initial_rect(),
             self._ui_manager,
@@ -108,7 +123,7 @@ class FileDialogManager:
         self.object_id = object_id  # XXX if we pass this to the actual dialog it screws up the display...
 
     def prompt_for_export_dest(self, object_id, window_title="Export..."):
-        self.destroy_dialog()
+        self.destroy_dialogs()
         self.file_dialog = UIFileDialogFixed(
             self.get_initial_rect(),
             self._ui_manager,
@@ -119,6 +134,30 @@ class FileDialogManager:
             # object_id=object_id
         )
         self.object_id = object_id  # XXX if we pass this to the actual dialog it screws up the display...
+
+    def destroy_message_dialog(self):
+        if self.message_dialog is not None:
+            self.message_dialog.kill()
+            self.message_dialog = None
+
+    def show_message(self, message):
+        self.destroy_dialogs()
+        self.message_dialog = pygame_gui.windows.ui_message_window.UIMessageWindow(
+            self.get_initial_rect(for_file_dialog=False), message, self._ui_manager
+        )
+
+    def show_confirm_prompt(self, message, ok_action, object_id):
+        self.destroy_dialogs()
+        self.message_dialog = pygame_gui.windows.ui_confirmation_dialog.UIConfirmationDialog(
+            self.get_initial_rect(for_file_dialog=False), self._ui_manager, message,
+            object_id=object_id
+        )
+        self.confirm_action = ok_action
+
+    def apply_confirm_action(self):
+        if self.confirm_action is not None:
+            self.confirm_action()
+            self.confirm_action = None
 
 
 class State:
@@ -738,11 +777,11 @@ class MainWindow:
     def __init__(self, size=(960, 480), state=None):
         self.state: State = state or State()
 
-        self.top_toolbar = None
-        self.blur_controls = None
-        self.simulation_controls = None
-        self.deblur_controls = None
-        self.file_dialog_manager = None
+        self.top_toolbar: TopControlPanel = None
+        self.blur_controls: BlurControlPanel = None
+        self.simulation_controls: SimulationControlPanel = None
+        self.deblur_controls: BlurControlPanel = None
+        self.file_dialog_manager: FileDialogManager = None
 
         self._base_size = size
         self._fps = 60
@@ -952,12 +991,25 @@ class MainWindow:
                     else:
                         filepath = e.text
 
-                    try:
-                        pygame.image.save(img_to_save, filepath)
-                        print(f"INFO: saved image to {filepath}")
-                    except pygame.error:
-                        print(f"ERROR: failed to export image to: {filepath}")
-                        traceback.print_exc()
+                    just_filename = os.path.split(filepath)[1]
+
+                    def export_action():
+                        try:
+                            pygame.image.save(img_to_save, filepath)
+                            print(f"INFO: saved image to {filepath}")
+                            self.file_dialog_manager.show_message(f"Saved {just_filename}")
+                        except pygame.error:
+                            print(f"ERROR: failed to export image to: {filepath}")
+                            traceback.print_exc()
+                            self.file_dialog_manager.show_message(f"Failed to save {just_filename}")
+
+                    if os.path.isfile(filepath):
+                        # ask if we want to overwrite
+                        self.file_dialog_manager.show_confirm_prompt(f"The selected file already exists. Overwrite {just_filename}?",
+                                                                     export_action, "#overwrite_file_confirmation")
+                    else:
+                        export_action()
+
             elif "#import_file_dialog" in self.file_dialog_manager.object_id:
                 try:
                     imported_img = pygame.image.load(e.text)
@@ -974,10 +1026,13 @@ class MainWindow:
                 except pygame.error:
                     print(f"ERROR: failed to import image: {e.text}")
                     traceback.print_exc()
+                    self.file_dialog_manager.show_message(f"Failed to import {e.text}")
                 self.file_dialog_manager.object_id = ""
+        elif e.type == pygame_gui.UI_CONFIRMATION_DIALOG_CONFIRMED:
+            if "#overwrite_file_confirmation" in e.ui_object_id:
+                self.file_dialog_manager.apply_confirm_action()
         elif e.type == pygame_gui.UI_WINDOW_CLOSE:
-            print("INFO: file dialog closed")
-            self.file_dialog_manager.destroy_dialog()
+            self.file_dialog_manager.destroy_dialogs(object_ids=[e.ui_object_id])
 
     def run(self):
         pygame.init()
